@@ -12,7 +12,7 @@ TAG       ?= latest
 
 SERVICES  := backend frontend capture-agent
 
-.PHONY: build push build-push deploy test-suricata test-db help
+.PHONY: build push build-push deploy test-suricata test-db test-redis help
 
 build:
 	@for svc in $(SERVICES); do \
@@ -44,6 +44,10 @@ test-db:
 	@echo "==> Running database schema integration tests..."
 	@bash services/db/tests/test_schema.sh
 
+test-redis:
+	@echo "==> Running Redis pub/sub integration tests..."
+	@bash services/backend/tests/test_channels.sh
+
 help:
 	@echo "Targets:"
 	@echo "  build          Build all service images"
@@ -52,3 +56,4 @@ help:
 	@echo "  deploy         Pull latest images and restart all services (requires UNRAID_HOST)"
 	@echo "  test-suricata  Build suricata image and validate config + entrypoint logic"
 	@echo "  test-db        Spin up a temporary TimescaleDB container and validate the schema"
+	@echo "  test-redis     Spin up a temporary Redis container and validate pub/sub channels"
