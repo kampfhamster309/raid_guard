@@ -1,0 +1,224 @@
+%YAML 1.1
+---
+# raid_guard — Suricata IDS configuration
+# Input: libpcap stream via named FIFO from capture-agent
+# Output: EVE JSON to /var/log/suricata/eve.json
+
+vars:
+  address-groups:
+    # Broad RFC1918 default — covers typical Fritzbox home networks.
+    # Override FRITZ_HOME_NET env var or edit here to narrow the scope.
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12]"
+    EXTERNAL_NET: "!$HOME_NET"
+    HTTP_SERVERS: "$HOME_NET"
+    SMTP_SERVERS: "$HOME_NET"
+    SQL_SERVERS: "$HOME_NET"
+    DNS_SERVERS: "$HOME_NET"
+    TELNET_SERVERS: "$HOME_NET"
+    AIM_SERVERS: "$EXTERNAL_NET"
+    DC_SERVERS: "$HOME_NET"
+    DNP3_SERVER: "$HOME_NET"
+    DNP3_CLIENT: "$HOME_NET"
+    MODBUS_CLIENT: "$HOME_NET"
+    MODBUS_SERVER: "$HOME_NET"
+    ENIP_CLIENT: "$HOME_NET"
+    ENIP_SERVER: "$HOME_NET"
+
+  port-groups:
+    HTTP_PORTS: "80"
+    SHELLCODE_PORTS: "!80"
+    ORACLE_PORTS: 1521
+    SSH_PORTS: 22
+    DNP3_PORTS: 20000
+    MODBUS_PORTS: 502
+    FILE_DATA_PORTS: "[$HTTP_PORTS,110,143]"
+    FTP_PORTS: 21
+    GENEVE_PORTS: 6081
+    VXLAN_PORTS: 4789
+    TEREDO_PORTS: 3544
+
+default-log-dir: /var/log/suricata/
+
+# ── Outputs ──────────────────────────────────────────────────────────────────
+
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      # Rotate log daily; the ingestor tails this file continuously.
+      rotate-interval: day
+      types:
+        - alert:
+            payload: no
+            metadata: yes
+            tagged-packets: no
+        - anomaly:
+            enabled: yes
+            types:
+              applayer: yes
+              decode: no
+              stream: no
+        - http:
+            extended: yes
+        - dns:
+            query: yes
+            answer: yes
+        - tls:
+            extended: yes
+        - files:
+            force-magic: no
+        - smtp:
+            extended: yes
+        - ftp
+        - rdp
+        - nfs
+        - smb
+        - flow
+        - netflow
+
+  # Disable all other outputs — EVE JSON is the single source of truth.
+  - fast:
+      enabled: no
+  - unified2-alert:
+      enabled: no
+  - http-log:
+      enabled: no
+  - pcap-log:
+      enabled: no
+  - alert-debug:
+      enabled: no
+  - stats:
+      enabled: no
+  - syslog:
+      enabled: no
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+logging:
+  default-log-level: notice
+  outputs:
+    - console:
+        enabled: yes
+    - file:
+        enabled: yes
+        level: info
+        filename: /var/log/suricata/suricata.log
+
+# ── PCAP file input ───────────────────────────────────────────────────────────
+# Actual input path is passed via -r flag in entrypoint.sh.
+# checksum-checks: auto lets Suricata decide based on the capture type.
+
+pcap-file:
+  checksum-checks: auto
+
+# ── Detection engine ─────────────────────────────────────────────────────────
+
+detect:
+  profile: medium
+  custom-values:
+    toclient-groups: 3
+    toserver-groups: 25
+  sgh-mpm-context: auto
+  inspection-recursion-limit: 3000
+  prefilter:
+    default: mpm
+
+# ── Application layer ─────────────────────────────────────────────────────────
+
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      detection-ports:
+        dp: 443
+    http:
+      enabled: yes
+    ftp:
+      enabled: yes
+    ssh:
+      enabled: yes
+    smtp:
+      enabled: yes
+    dns:
+      tcp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+      udp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+    http2:
+      enabled: yes
+    rdp:
+      enabled: yes
+    smb:
+      enabled: yes
+      detection-ports:
+        dp: 139, 445
+    nfs:
+      enabled: yes
+    krb5:
+      enabled: yes
+    snmp:
+      enabled: yes
+    ntp:
+      enabled: yes
+    dhcp:
+      enabled: yes
+    ikev2:
+      enabled: yes
+    sip:
+      enabled: yes
+    rfb:
+      enabled: yes
+      detection-ports:
+        dp: 5900, 5901, 5902, 5903, 5904, 5905
+    tftp:
+      enabled: yes
+    modbus:
+      enabled: no
+    dnp3:
+      enabled: no
+    enip:
+      enabled: no
+
+# ── Flow and stream ───────────────────────────────────────────────────────────
+
+flow:
+  memcap: 128mb
+  hash-size: 65536
+  prealloc: 10000
+  emergency-recovery: 30
+
+stream:
+  memcap: 64mb
+  checksum-validation: yes
+  inline: no
+  reassembly:
+    memcap: 256mb
+    depth: 1mb
+    toserver-chunk-size: 2560
+    toclient-chunk-size: 2560
+    randomize-chunk-size: yes
+
+# ── Rules ─────────────────────────────────────────────────────────────────────
+
+default-rule-path: /var/lib/suricata/rules
+
+rule-files:
+  - suricata.rules
+
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+
+host-mode: auto
+unix-command:
+  enabled: auto
+legacy:
+  uricontent: enabled
+exception-policy: auto
+asn1-max-frames: 256

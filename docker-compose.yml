@@ -21,11 +21,14 @@ services:
 
   suricata:
     build: ./services/suricata
-    # Placeholder command — replaced with PCAP-file input in RAID-002b
-    command: ["tail", "-f", "/dev/null"]
+    environment:
+      FIFO_PATH: /pcap/fritz.pcap
+      SURICATA_LOG_DIR: /var/log/suricata
+      SURICATA_CONFIG: /etc/suricata/suricata.yaml
     volumes:
       - pcap_pipe:/pcap:ro
       - suricata_logs:/var/log/suricata
+      - suricata_rules:/var/lib/suricata/rules
     networks:
       - raid_guard_net
     restart: unless-stopped
@@ -110,5 +113,6 @@ networks:
 volumes:
   pcap_pipe:
   suricata_logs:
+  suricata_rules:
   postgres_data:
   redis_data:

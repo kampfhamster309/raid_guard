@@ -12,7 +12,7 @@ TAG       ?= latest
 
 SERVICES  := backend frontend capture-agent
 
-.PHONY: build push build-push deploy help
+.PHONY: build push build-push deploy test-suricata help
 
 build:
 	@for svc in $(SERVICES); do \
@@ -34,9 +34,16 @@ deploy:
 	docker compose pull
 	docker compose up -d
 
+test-suricata:
+	@echo "==> Running Suricata config validation test..."
+	@bash services/suricata/tests/test_config.sh
+	@echo "==> Running Suricata entrypoint unit tests..."
+	@bash services/suricata/tests/test_entrypoint.sh
+
 help:
 	@echo "Targets:"
-	@echo "  build       Build all service images"
-	@echo "  push        Push images to the Unraid registry (requires UNRAID_HOST)"
-	@echo "  build-push  Build then push"
-	@echo "  deploy      Pull latest images and restart all services (requires UNRAID_HOST)"
+	@echo "  build          Build all service images"
+	@echo "  push           Push images to the Unraid registry (requires UNRAID_HOST)"
+	@echo "  build-push     Build then push"
+	@echo "  deploy         Pull latest images and restart all services (requires UNRAID_HOST)"
+	@echo "  test-suricata  Build suricata image and validate config + entrypoint logic"
