@@ -12,7 +12,7 @@ TAG       ?= latest
 
 SERVICES  := backend frontend capture-agent
 
-.PHONY: build push build-push deploy test-suricata test-db test-redis help
+.PHONY: build push build-push deploy test-suricata test-db test-redis test-ingestor help
 
 build:
 	@for svc in $(SERVICES); do \
@@ -48,6 +48,12 @@ test-redis:
 	@echo "==> Running Redis pub/sub integration tests..."
 	@bash services/backend/tests/test_channels.sh
 
+test-ingestor:
+	@echo "==> Running ingestor unit tests..."
+	@cd services/backend && .venv/bin/python -m pytest tests/test_ingestor.py -v
+	@echo "==> Running ingestor integration tests..."
+	@bash services/backend/tests/test_ingestor_integration.sh
+
 help:
 	@echo "Targets:"
 	@echo "  build          Build all service images"
@@ -57,3 +63,4 @@ help:
 	@echo "  test-suricata  Build suricata image and validate config + entrypoint logic"
 	@echo "  test-db        Spin up a temporary TimescaleDB container and validate the schema"
 	@echo "  test-redis     Spin up a temporary Redis container and validate pub/sub channels"
+	@echo "  test-ingestor  Unit + integration tests for the EVE JSON ingestor"
