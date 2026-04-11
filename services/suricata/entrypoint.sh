@@ -25,9 +25,8 @@ done
 echo "[entrypoint] FIFO found."
 
 # ── 3. Start Suricata ─────────────────────────────────────────────────────────
-echo "[entrypoint] Starting Suricata (pcap-file-continuous mode)..."
+echo "[entrypoint] Starting Suricata..."
 exec suricata \
     -c "${SURICATA_CONFIG}" \
     -r "${FIFO_PATH}" \
-    --pcap-file-continuous \
     -l "${SURICATA_LOG_DIR}"

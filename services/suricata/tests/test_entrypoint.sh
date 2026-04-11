@@ -59,7 +59,10 @@ run_entrypoint "${FIFO}" 0 "${ARGS}"
                  || fail "proceeds immediately when FIFO exists"
 rm -rf "${TMP}"
 
-# ── Test 2: passes -r <fifo> and --pcap-file-continuous to suricata ───────────
+# ── Test 2: passes -r <fifo> to suricata; does NOT pass --pcap-file-continuous ──
+# --pcap-file-continuous opens FIFOs with O_NONBLOCK, causing pcap_next_ex() to
+# return -1 immediately when no packet is buffered yet.  We rely on blocking
+# reads instead so Suricata waits for the first packet naturally.
 TMP=$(mktemp -d)
 FIFO="${TMP}/fritz.pcap"; mkfifo "${FIFO}"
 ARGS="${TMP}/args"
@@ -68,14 +71,14 @@ run_entrypoint "${FIFO}" 0 "${ARGS}"
 if [ -f "${ARGS}" ]; then
     SURICATA_ARGS=$(cat "${ARGS}")
     if echo "${SURICATA_ARGS}" | grep -q -- "-r ${FIFO}" \
-    && echo "${SURICATA_ARGS}" | grep -q -- "--pcap-file-continuous"; then
-        pass "passes -r <fifo> and --pcap-file-continuous to suricata"
+    && ! echo "${SURICATA_ARGS}" | grep -q -- "--pcap-file-continuous"; then
+        pass "passes -r <fifo> without --pcap-file-continuous"
     else
-        fail "passes -r <fifo> and --pcap-file-continuous to suricata"
+        fail "passes -r <fifo> without --pcap-file-continuous"
         echo "    Got: ${SURICATA_ARGS}"
     fi
 else
-    fail "passes -r <fifo> and --pcap-file-continuous to suricata (suricata not called)"
+    fail "passes -r <fifo> without --pcap-file-continuous (suricata not called)"
 fi
 rm -rf "${TMP}"
 

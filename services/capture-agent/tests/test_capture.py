@@ -1,12 +1,133 @@
 import os
 import stat
+import struct
 from pathlib import Path
-from unittest.mock import MagicMock, call, mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-from app.capture import ensure_fifo, stream_to_fifo
+from app.capture import _rewrite_kuznetzov, ensure_fifo, stream_to_fifo
 from app.state import AgentState, CaptureState
+
+
+# ── pcap fixture helpers ───────────────────────────────────────────────────────
+
+_KUZ_MAGIC = bytes.fromhex("34cdb2a1")  # 0xa1b2cd34 LE
+_STD_MAGIC  = bytes.fromhex("d4c3b2a1")  # 0xa1b2c3d4 LE
+
+
+def _global_header(magic: bytes, snaplen: int = 65535, linktype: int = 1) -> bytes:
+    return (
+        magic
+        + struct.pack("<HH", 2, 4)   # version 2.4
+        + struct.pack("<i", 0)        # thiszone
+        + struct.pack("<I", 0)        # sigfigs
+        + struct.pack("<I", snaplen)
+        + struct.pack("<I", linktype)
+    )
+
+
+def _kuz_record(payload: bytes) -> bytes:
+    """Single Kuznetzov per-packet record (24-byte header + payload)."""
+    caplen = len(payload)
+    return (
+        struct.pack("<IIII", 0, 0, caplen, caplen)   # ts_sec, ts_usec, caplen, len
+        + struct.pack("<IHBx", 0, 0, 0)              # ifindex, proto, pkt_type, pad
+        + payload
+    )
+
+
+def _std_record(payload: bytes) -> bytes:
+    """Single standard per-packet record (16-byte header + payload)."""
+    caplen = len(payload)
+    return struct.pack("<IIII", 0, 0, caplen, caplen) + payload
+
+
+def _kuz_pcap(*payloads: bytes) -> bytes:
+    return _global_header(_KUZ_MAGIC) + b"".join(_kuz_record(p) for p in payloads)
+
+
+def _std_pcap(*payloads: bytes) -> bytes:
+    return _global_header(_STD_MAGIC) + b"".join(_std_record(p) for p in payloads)
+
+
+def _collect(chunks) -> bytes:
+    return b"".join(chunks)
+
+
+# ── _rewrite_kuznetzov ─────────────────────────────────────────────────────────
+
+def test_rewrite_replaces_kuznetzov_magic():
+    data = _kuz_pcap(b"pkt1")
+    result = _collect(_rewrite_kuznetzov(iter([data])))
+    assert result[:4] == _STD_MAGIC
+
+
+def test_rewrite_strips_8_extra_bytes_per_packet():
+    payload = b"A" * 20
+    data = _kuz_pcap(payload)
+    result = _collect(_rewrite_kuznetzov(iter([data])))
+    expected = _std_pcap(payload)
+    assert result == expected
+
+
+def test_rewrite_preserves_packet_payload():
+    payload = bytes(range(256))
+    data = _kuz_pcap(payload)
+    result = _collect(_rewrite_kuznetzov(iter([data])))
+    # payload must appear verbatim after the 24-byte global + 16-byte pkt header
+    assert result[24 + 16:] == payload
+
+
+def test_rewrite_handles_multiple_packets():
+    pkts = [b"first_packet", b"second_packet", b"third_packet"]
+    data = _kuz_pcap(*pkts)
+    result = _collect(_rewrite_kuznetzov(iter([data])))
+    assert result == _std_pcap(*pkts)
+
+
+def test_rewrite_handles_chunks_split_across_header_boundary():
+    """Chunk boundary falls inside a per-packet header — must still produce correct output."""
+    pkts = [b"hello", b"world"]
+    full = _kuz_pcap(*pkts)
+    # Deliver in 1-byte chunks to exercise all boundary conditions
+    chunks = [full[i:i+1] for i in range(len(full))]
+    result = _collect(_rewrite_kuznetzov(iter(chunks)))
+    assert result == _std_pcap(*pkts)
+
+
+def test_rewrite_handles_chunks_split_inside_payload():
+    payload = b"X" * 100
+    full = _kuz_pcap(payload)
+    # Split right inside the payload
+    split = 40
+    chunks = [full[:split], full[split:]]
+    result = _collect(_rewrite_kuznetzov(iter(chunks)))
+    assert result == _std_pcap(payload)
+
+
+def test_rewrite_passthrough_standard_format():
+    """Standard-magic pcap is passed through with only the magic rewritten (same value)."""
+    payload = b"standard_pkt"
+    # Build a standard pcap (16-byte per-packet headers)
+    data = _global_header(_STD_MAGIC) + _std_record(payload)
+    result = _collect(_rewrite_kuznetzov(iter([data])))
+    # Magic stays standard; payload is preserved
+    assert result[:4] == _STD_MAGIC
+    assert payload in result
+
+
+def test_rewrite_skips_empty_chunks():
+    payload = b"data"
+    data = _kuz_pcap(payload)
+    chunks = [b"", data, b""]
+    result = _collect(_rewrite_kuznetzov(iter(chunks)))
+    assert result == _std_pcap(payload)
+
+
+def test_rewrite_empty_input():
+    result = _collect(_rewrite_kuznetzov(iter([])))
+    assert result == b""
 
 
 # ── ensure_fifo ────────────────────────────────────────────────────────────────
@@ -50,41 +171,28 @@ def _make_streaming_response(chunks: list[bytes]) -> MagicMock:
 
 
 @patch("app.capture.requests.get")
-def test_stream_to_fifo_writes_chunks(mock_get, tmp_path):
+def test_stream_to_fifo_writes_rewritten_pcap(mock_get, tmp_path):
+    """stream_to_fifo rewrites Kuznetzov pcap and writes standard pcap to FIFO."""
     fifo_path = tmp_path / "test.pcap"
-    os.mkfifo(fifo_path)
-
-    chunks = [b"chunk1", b"chunk2", b"chunk3"]
-    mock_get.return_value = _make_streaming_response(chunks)
+    payload = b"ethernet_frame_data"
+    pcap_data = _kuz_pcap(payload)
+    mock_get.return_value = _make_streaming_response([pcap_data])
 
     state = AgentState()
     written = bytearray()
 
-    original_open = open
-
-    def fake_open(path, mode="r", **kwargs):
-        if str(path) == str(fifo_path) and "b" in mode:
-            return original_open(fifo_path, mode, **kwargs)
-        return original_open(path, mode, **kwargs)
-
-    # Use a regular file so the test doesn't block waiting for a FIFO reader
-    fifo_path.unlink()
-    fifo_path.write_bytes(b"")  # regular file for test purposes
-
     with patch("builtins.open", mock_open()) as mocked_file:
         handle = mocked_file.return_value.__enter__.return_value
+        handle.write.side_effect = lambda b: written.extend(b)
         stream_to_fifo("192.168.178.1", "3-19", "abc123sid0000000", state, fifo_path)
 
-    handle.write.assert_any_call(b"chunk1")
-    handle.write.assert_any_call(b"chunk2")
-    handle.write.assert_any_call(b"chunk3")
-    assert handle.flush.call_count == 3
+    assert bytes(written) == _std_pcap(payload)
 
 
 @patch("app.capture.requests.get")
 def test_stream_to_fifo_sets_streaming_state(mock_get, tmp_path):
     fifo_path = tmp_path / "test.pcap"
-    mock_get.return_value = _make_streaming_response([b"data"])
+    mock_get.return_value = _make_streaming_response([_kuz_pcap(b"pkt")])
 
     state = AgentState()
 
@@ -96,20 +204,22 @@ def test_stream_to_fifo_sets_streaming_state(mock_get, tmp_path):
 
 @patch("app.capture.requests.get")
 def test_stream_to_fifo_skips_empty_chunks(mock_get, tmp_path):
+    """Empty chunks in the HTTP stream produce no output."""
     fifo_path = tmp_path / "test.pcap"
-    chunks = [b"", b"real_data", b"", b"more_data"]
+    payload = b"real_pkt"
+    chunks = [b"", _kuz_pcap(payload), b""]
     mock_get.return_value = _make_streaming_response(chunks)
 
     state = AgentState()
+    written = bytearray()
 
     with patch("builtins.open", mock_open()) as mocked_file:
         handle = mocked_file.return_value.__enter__.return_value
+        handle.write.side_effect = lambda b: written.extend(b)
         stream_to_fifo("192.168.178.1", "3-19", "abc123sid0000000", state, fifo_path)
 
-    write_calls = [c.args[0] for c in handle.write.call_args_list]
-    assert b"" not in write_calls
-    assert b"real_data" in write_calls
-    assert b"more_data" in write_calls
+    assert payload in bytes(written)
+    assert bytes(written) == _std_pcap(payload)
 
 
 @patch("app.capture.requests.get")

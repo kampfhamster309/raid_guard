@@ -8,6 +8,8 @@ services:
       FRITZ_USER: ${FRITZ_USER}
       FRITZ_PASSWORD: ${FRITZ_PASSWORD}
       FRITZ_IFACE_ID: ${FRITZ_IFACE_ID:-3-19}
+    ports:
+      - "8080:8080"
     volumes:
       - pcap_pipe:/pcap
     networks:

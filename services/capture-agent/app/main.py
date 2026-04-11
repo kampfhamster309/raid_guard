@@ -37,7 +37,6 @@ async def capture_loop(state: AgentState = agent_state) -> None:
                 get_sid, FRITZ_HOST, FRITZ_USER, FRITZ_PASSWORD
             )
 
-            state.set(CaptureState.WAITING_FOR_READER, "Waiting for Suricata to open FIFO")
             await asyncio.to_thread(
                 stream_to_fifo, FRITZ_HOST, FRITZ_IFACE_ID, sid, state
             )

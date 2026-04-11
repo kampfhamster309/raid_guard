@@ -1,7 +1,7 @@
 # raid_guard
 
-> **Work in progress.** Core capture, detection, ingestion, and API layers are
-> functional (RAID-001 through RAID-006). The React frontend, AI enrichment,
+> **Work in progress.** Core capture, detection, ingestion, API, and dashboard layers are
+> functional (RAID-001 through RAID-007). AI enrichment,
 > alerting integrations, and active-response features are still under
 > development. See `development_plan.md` for the full roadmap.
 
@@ -140,7 +140,7 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`) |
 | `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor background task |
-| `frontend` | 🚧 | nginx placeholder — React PWA dashboard (RAID-007) |
+| `frontend` | ✅ | React PWA dashboard — Vite + Tailwind, live alert feed via WebSocket, filter/search, alert detail drawer |
 
 ---
 
@@ -152,6 +152,9 @@ cd services/backend && .venv/bin/python -m pytest tests/test_health.py tests/tes
 
 # Capture-agent unit tests
 cd services/capture-agent && .venv/bin/python -m pytest tests/ -v
+
+# Frontend unit tests (no external deps)
+cd services/frontend && npm test
 
 # Integration tests (each spins up real Docker containers, then tears them down)
 make test-suricata   # Suricata config validation + entrypoint logic
