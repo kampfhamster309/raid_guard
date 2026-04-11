@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
 
     ingestor_task = asyncio.create_task(ingestor_loop(pool, redis_client))
 
-    backends = [b for b in [HomeAssistantBackend.from_env()] if b is not None]
+    backends = [b for b in [HomeAssistantBackend.from_env(pool)] if b is not None]
     notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
 
     try:

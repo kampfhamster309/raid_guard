@@ -83,6 +83,8 @@ services:
       SURICATA_CONTAINER_NAME: ${COMPOSE_PROJECT_NAME:-raid_guard}-suricata-1
       SURICATA_DISABLE_CONF: /suricata/config/disable.conf
       SURICATA_DISABLE_CONF_CONTAINER: /etc/suricata/custom/disable.conf
+      HA_WEBHOOK_URL: ${HA_WEBHOOK_URL:-}
+      DASHBOARD_URL: ${DASHBOARD_URL:-}
     volumes:
       - suricata_logs:/var/log/suricata:ro
       - suricata_config:/suricata/config

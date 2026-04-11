@@ -1,4 +1,4 @@
-import type { Alert, RuleCategory, Stats } from "./types";
+import type { Alert, HaSettings, RuleCategory, Stats } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -112,6 +112,26 @@ export async function reloadSuricata(): Promise<string> {
   const res = await authFetch("/api/rules/reload", { method: "POST" });
   const data = (await res.json()) as { message: string };
   return data.message;
+}
+
+// ── Home Assistant API ────────────────────────────────────────────────────────
+
+export async function fetchHaSettings(): Promise<HaSettings> {
+  const res = await authFetch("/api/settings/ha");
+  return res.json() as Promise<HaSettings>;
+}
+
+export async function updateHaSettings(enabled: boolean): Promise<HaSettings> {
+  const res = await authFetch("/api/settings/ha", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  return res.json() as Promise<HaSettings>;
+}
+
+export async function testHaSend(): Promise<void> {
+  await authFetch("/api/settings/ha/test", { method: "POST" });
 }
 
 export function createAlertWebSocket(token: string): WebSocket {

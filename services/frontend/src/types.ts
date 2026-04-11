@@ -40,3 +40,8 @@ export interface RuleCategory {
   description: string;
   enabled: boolean;
 }
+
+export interface HaSettings {
+  enabled: boolean;
+  configured: boolean;
+}

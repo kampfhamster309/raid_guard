@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { clearToken, getToken } from "./api";
+import { useEffect, useState } from "react";
+import { clearToken, fetchAlert, getToken } from "./api";
 import { LoginPage } from "./components/LoginPage";
 import { Header } from "./components/Header";
 import { FilterBar } from "./components/FilterBar";
@@ -50,6 +50,16 @@ function AlertsPage({ onLogout }: { onLogout: () => void }) {
     severityFilter,
     searchText,
   });
+
+  // Open the alert drawer when a deep link like ?alert=<id> is present.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const alertId = params.get("alert");
+    if (!alertId) return;
+    fetchAlert(alertId)
+      .then(setSelectedAlert)
+      .catch(() => {});
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-slate-900 text-slate-100">
