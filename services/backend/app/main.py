@@ -10,7 +10,7 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from .auth import decode_token
 from .channels import ALERTS_ENRICHED, get_redis_url
 from .ingestor import ingestor_loop
-from .routers import alerts, auth, stats
+from .routers import alerts, auth, rules, stats
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,7 @@ app = FastAPI(title="raid_guard backend", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(alerts.router)
 app.include_router(stats.router)
+app.include_router(rules.router)
 
 
 @app.get("/health")

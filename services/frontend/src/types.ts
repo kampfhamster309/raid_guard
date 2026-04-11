@@ -33,3 +33,10 @@ export interface Stats {
   top_src_ips: TopItem[];
   top_signatures: TopItem[];
 }
+
+export interface RuleCategory {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+}

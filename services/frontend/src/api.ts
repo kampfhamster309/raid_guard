@@ -1,4 +1,4 @@
-import type { Alert, Stats } from "./types";
+import type { Alert, RuleCategory, Stats } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -81,6 +81,37 @@ export async function fetchStats(): Promise<Stats> {
   }
   if (!res.ok) throw new Error(`Failed to fetch stats: ${res.status}`);
   return res.json() as Promise<Stats>;
+}
+
+// ── Rules API ─────────────────────────────────────────────────────────────────
+
+async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(url, { ...init, headers: { ...authHeaders(), ...(init.headers as Record<string, string> ?? {}) } });
+  if (res.status === 401) { clearToken(); window.location.reload(); throw new Error("Unauthorized"); }
+  if (!res.ok) throw new Error(`${init.method ?? "GET"} ${url} failed: ${res.status}`);
+  return res;
+}
+
+export async function fetchRuleCategories(): Promise<RuleCategory[]> {
+  const res = await authFetch("/api/rules/categories");
+  const data = (await res.json()) as { categories: RuleCategory[] };
+  return data.categories;
+}
+
+export async function updateRuleCategories(disabled: string[]): Promise<RuleCategory[]> {
+  const res = await authFetch("/api/rules/categories", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ disabled }),
+  });
+  const data = (await res.json()) as { categories: RuleCategory[] };
+  return data.categories;
+}
+
+export async function reloadSuricata(): Promise<string> {
+  const res = await authFetch("/api/rules/reload", { method: "POST" });
+  const data = (await res.json()) as { message: string };
+  return data.message;
 }
 
 export function createAlertWebSocket(token: string): WebSocket {

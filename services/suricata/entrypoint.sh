@@ -11,7 +11,14 @@ SURICATA_CONFIG="${SURICATA_CONFIG:-/etc/suricata/suricata.yaml}"
 
 # ── 1. Update rules ───────────────────────────────────────────────────────────
 echo "[entrypoint] Updating Suricata rules (ET Open)..."
-if suricata-update --no-test 2>&1; then
+DISABLE_CONF="${SURICATA_DISABLE_CONF:-/etc/suricata/custom/disable.conf}"
+if [ -f "${DISABLE_CONF}" ]; then
+    echo "[entrypoint] Applying disable.conf: ${DISABLE_CONF}"
+    UPDATE_CMD="suricata-update --no-test --disable-conf ${DISABLE_CONF}"
+else
+    UPDATE_CMD="suricata-update --no-test"
+fi
+if ${UPDATE_CMD} 2>&1; then
     echo "[entrypoint] Rules updated successfully."
 else
     echo "[entrypoint] WARNING: suricata-update failed. Using existing rules if available."

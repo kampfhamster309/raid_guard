@@ -6,15 +6,17 @@ import { FilterBar } from "./components/FilterBar";
 import { AlertTable } from "./components/AlertTable";
 import { AlertDrawer } from "./components/AlertDrawer";
 import { DashboardPage } from "./components/DashboardPage";
+import { ConfigPage } from "./components/ConfigPage";
 import { useAlerts } from "./hooks/useAlerts";
 import type { Alert, Severity } from "./types";
 
 type SeverityFilter = Severity | "all";
-type Page = "alerts" | "dashboard";
+type Page = "alerts" | "dashboard" | "config";
 
 const TABS: { id: Page; label: string }[] = [
   { id: "alerts", label: "Alerts" },
   { id: "dashboard", label: "Dashboard" },
+  { id: "config", label: "Config" },
 ];
 
 function NavTabs({ page, onChange }: { page: Page; onChange: (p: Page) => void }) {
@@ -82,8 +84,10 @@ function AlertsPage({ onLogout }: { onLogout: () => void }) {
             onClose={() => setSelectedAlert(null)}
           />
         </>
-      ) : (
+      ) : page === "dashboard" ? (
         <DashboardPage />
+      ) : (
+        <ConfigPage />
       )}
     </div>
   );

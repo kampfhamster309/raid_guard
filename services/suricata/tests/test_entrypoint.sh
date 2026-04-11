@@ -17,18 +17,20 @@ echo ""
 # ── Helper ────────────────────────────────────────────────────────────────────
 
 # Run the entrypoint with mock binaries injected at the front of PATH.
-# Args: <fifo_path> <update_exit_code> <args_out_file>
+# Args: <fifo_path> <update_exit_code> <suricata_args_out> <update_args_out>
 # Any extra env vars set by the caller are inherited.
 run_entrypoint() {
     local fifo="$1"
     local update_exit="${2:-0}"
     local args_file="${3:-/dev/null}"
+    local update_args_file="${4:-/dev/null}"
     local mock_dir
     mock_dir=$(mktemp -d)
 
-    # Mock suricata-update: exits with the requested code
+    # Mock suricata-update: writes received args to file and exits with requested code
     cat > "${mock_dir}/suricata-update" << EOF
 #!/bin/bash
+echo "\$*" > '${update_args_file}'
 exit ${update_exit}
 EOF
 
@@ -129,6 +131,38 @@ if [ -f "${ARGS}" ]; then
     fi
 else
     fail "passes -c <config> to suricata (suricata not called)"
+fi
+rm -rf "${TMP}"
+
+# ── Test 6: passes --disable-conf to suricata-update when config file exists ──
+TMP=$(mktemp -d)
+FIFO="${TMP}/fritz.pcap"; mkfifo "${FIFO}"
+ARGS="${TMP}/suricata_args"
+UPDATE_ARGS="${TMP}/update_args"
+DISABLE_CONF="${TMP}/disable.conf"
+echo "group:emerging-p2p" > "${DISABLE_CONF}"
+
+SURICATA_DISABLE_CONF="${DISABLE_CONF}" run_entrypoint "${FIFO}" 0 "${ARGS}" "${UPDATE_ARGS}"
+if [ -f "${UPDATE_ARGS}" ] && grep -q -- "--disable-conf" "${UPDATE_ARGS}"; then
+    pass "passes --disable-conf to suricata-update when config file exists"
+else
+    fail "passes --disable-conf to suricata-update when config file exists"
+    [ -f "${UPDATE_ARGS}" ] && echo "    Got: $(cat "${UPDATE_ARGS}")" || echo "    (update_args file missing)"
+fi
+rm -rf "${TMP}"
+
+# ── Test 7: does NOT pass --disable-conf when config file is absent ───────────
+TMP=$(mktemp -d)
+FIFO="${TMP}/fritz.pcap"; mkfifo "${FIFO}"
+ARGS="${TMP}/suricata_args"
+UPDATE_ARGS="${TMP}/update_args"
+
+SURICATA_DISABLE_CONF="${TMP}/nonexistent.conf" run_entrypoint "${FIFO}" 0 "${ARGS}" "${UPDATE_ARGS}"
+if [ -f "${UPDATE_ARGS}" ] && ! grep -q -- "--disable-conf" "${UPDATE_ARGS}"; then
+    pass "does NOT pass --disable-conf when config file is absent"
+else
+    fail "does NOT pass --disable-conf when config file is absent"
+    [ -f "${UPDATE_ARGS}" ] && echo "    Got: $(cat "${UPDATE_ARGS}")" || echo "    (update_args file missing)"
 fi
 rm -rf "${TMP}"
 

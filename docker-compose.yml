@@ -27,10 +27,12 @@ services:
       FIFO_PATH: /pcap/fritz.pcap
       SURICATA_LOG_DIR: /var/log/suricata
       SURICATA_CONFIG: /etc/suricata/suricata.yaml
+      SURICATA_DISABLE_CONF: /etc/suricata/custom/disable.conf
     volumes:
       - pcap_pipe:/pcap:ro
       - suricata_logs:/var/log/suricata
       - suricata_rules:/var/lib/suricata/rules
+      - suricata_config:/etc/suricata/custom
     networks:
       - raid_guard_net
     restart: unless-stopped
@@ -78,8 +80,13 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_NAME: ${DB_NAME:-raidguard}
       REDIS_URL: redis://redis:6379
+      SURICATA_CONTAINER_NAME: ${COMPOSE_PROJECT_NAME:-raid_guard}-suricata-1
+      SURICATA_DISABLE_CONF: /suricata/config/disable.conf
+      SURICATA_DISABLE_CONF_CONTAINER: /etc/suricata/custom/disable.conf
     volumes:
       - suricata_logs:/var/log/suricata:ro
+      - suricata_config:/suricata/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks:
@@ -119,5 +126,6 @@ volumes:
   pcap_pipe:
   suricata_logs:
   suricata_rules:
+  suricata_config:
   postgres_data:
   redis_data:
