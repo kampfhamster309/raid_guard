@@ -8,9 +8,11 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 
 from .auth import decode_token
+from .backends.homeassistant import HomeAssistantBackend
 from .channels import ALERTS_ENRICHED, get_redis_url
 from .ingestor import ingestor_loop
-from .routers import alerts, auth, rules, stats
+from .notification_router import run_notification_router
+from .routers import alerts, auth, rules, settings, stats
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +36,17 @@ async def lifespan(app: FastAPI):
     app.state.db_pool = pool
     app.state.redis = redis_client
 
-    task = asyncio.create_task(ingestor_loop(pool, redis_client))
+    ingestor_task = asyncio.create_task(ingestor_loop(pool, redis_client))
+
+    backends = [b for b in [HomeAssistantBackend.from_env()] if b is not None]
+    notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
 
     try:
         yield
     finally:
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
+        ingestor_task.cancel()
+        notif_task.cancel()
+        await asyncio.gather(ingestor_task, notif_task, return_exceptions=True)
         await redis_client.aclose()
         await pool.close()
 
@@ -51,6 +57,7 @@ app.include_router(auth.router)
 app.include_router(alerts.router)
 app.include_router(stats.router)
 app.include_router(rules.router)
+app.include_router(settings.router)
 
 
 @app.get("/health")
