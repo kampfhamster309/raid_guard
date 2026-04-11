@@ -1,9 +1,9 @@
 # raid_guard
 
-> **Work in progress.** Core capture, detection, ingestion, API, and dashboard layers are
-> functional (RAID-001 through RAID-007). AI enrichment,
-> alerting integrations, and active-response features are still under
-> development. See `development_plan.md` for the full roadmap.
+> **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
+> configuration, and Home Assistant push notifications are functional
+> (RAID-001 through RAID-010). AI enrichment and active-response features are
+> still under development. See `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
 on-premises LLM. Traffic is captured from an AVM Fritzbox router, analysed
@@ -124,6 +124,11 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/alerts` | Paginated alert list — query params: `limit`, `offset`, `severity`, `src_ip`, `after`, `before` |
 | `GET` | `/api/alerts/{id}` | Single alert detail including raw EVE JSON |
 | `GET` | `/api/stats` | Last-24 h totals, hourly chart data, top source IPs, top signatures |
+| `GET` | `/api/rules/categories` | List ET Open rule categories with enabled/disabled state |
+| `PUT` | `/api/rules/categories` | Update disabled categories (body: `{"disabled": ["emerging-p2p", ...]}`) |
+| `POST` | `/api/rules/reload` | Run `suricata-update` + SIGHUP inside the Suricata container |
+| `GET` | `/api/settings/push-threshold` | Get current notification push threshold (`info`/`warning`/`critical`) |
+| `PUT` | `/api/settings/push-threshold` | Set push threshold (body: `{"threshold": "warning"}`) |
 | `WS` | `/ws/alerts?token=<jwt>` | Live alert feed (subscribes to `alerts:enriched` Redis channel) |
 | `GET` | `/health` | Liveness check (no auth) |
 
@@ -139,8 +144,8 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor background task |
-| `frontend` | ✅ | React PWA dashboard — Vite + Tailwind, live alert feed via WebSocket, filter/search, alert detail drawer |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, rule category management, notification router (HA push) |
+| `frontend` | ✅ | React PWA — live alert feed, stats dashboard, rule config UI with category toggles and Suricata reload |
 
 ---
 
@@ -148,7 +153,7 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 
 ```bash
 # Backend unit tests (no external deps)
-cd services/backend && .venv/bin/python -m pytest tests/test_health.py tests/test_ingestor.py tests/test_auth.py tests/test_alerts_api.py tests/test_stats_api.py tests/test_websocket.py -v
+cd services/backend && .venv/bin/python -m pytest tests/ --ignore=tests/test_ingestor_integration.py -v
 
 # Capture-agent unit tests
 cd services/capture-agent && .venv/bin/python -m pytest tests/ -v
@@ -172,7 +177,7 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `UNRAID_HOST` | — | Unraid server IP (shell env var for make push/deploy) |
 | `FRITZ_HOST` | `192.168.178.1` | Fritzbox IP |
 | `FRITZ_USER` / `FRITZ_PASSWORD` | — | Fritzbox credentials |
-| `FRITZ_IFACE_ID` | `3-19` | Capture interface — try `3-0` if no traffic |
+| `FRITZ_IFACE_ID` | `3-17` | Capture interface — find yours at `http://192.168.178.1/html/capture.html` |
 | `DB_USER` / `DB_NAME` | `raidguard` | TimescaleDB database name and user |
 | `DB_PASSWORD` | — | TimescaleDB password |
 | `REDIS_URL` | `redis://redis:6379` | Redis connection URL |
@@ -181,10 +186,12 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `ADMIN_PASSWORD` | — | Dashboard login password (empty = login disabled) |
 | `JWT_SECRET` | random | HS256 signing key — generate with `secrets.token_hex(32)` |
 | `JWT_EXPIRY_HOURS` | `24` | Token lifetime |
+| `SURICATA_CONTAINER_NAME` | `suricata` | Docker container name for rule reload |
+| `SURICATA_DISABLE_CONF` | `/suricata/config/disable.conf` | Path inside the backend container to the disable.conf written by rule management |
 | `LM_STUDIO_URL` | — | LM Studio base URL (e.g. `http://192.168.1.x:1234/v1`) |
 | `LM_STUDIO_MODEL` | — | Model identifier (e.g. `gemma-4-27b`) |
 | `PIHOLE_HOST` / `PIHOLE_PASSWORD` | — | Pi-hole v6 address and API password |
-| `HA_WEBHOOK_URL` | — | Home Assistant webhook URL |
+| `HA_WEBHOOK_URL` | — | Home Assistant webhook URL (leave unset to disable push notifications) |
 
 ---
 
