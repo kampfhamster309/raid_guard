@@ -1,8 +1,8 @@
 # raid_guard
 
 > **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
-> configuration, and Home Assistant push notifications are functional
-> (RAID-001 through RAID-010). AI enrichment and active-response features are
+> configuration, Home Assistant push notifications, and AI alert enrichment
+> are functional (RAID-001 through RAID-014). Active-response features are
 > still under development. See `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
@@ -129,6 +129,12 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `POST` | `/api/rules/reload` | Run `suricata-update` + SIGHUP inside the Suricata container |
 | `GET` | `/api/settings/push-threshold` | Get current notification push threshold (`info`/`warning`/`critical`) |
 | `PUT` | `/api/settings/push-threshold` | Set push threshold (body: `{"threshold": "warning"}`) |
+| `GET` | `/api/settings/ha` | Get HA integration state (`{"enabled": bool, "configured": bool}`) |
+| `PUT` | `/api/settings/ha` | Enable or disable HA push notifications (body: `{"enabled": bool}`) |
+| `POST` | `/api/settings/ha/test` | Send a synthetic test notification to the configured HA webhook |
+| `GET` | `/api/settings/llm` | Get LM Studio configuration (URL, model, timeout, max tokens) |
+| `PUT` | `/api/settings/llm` | Persist LM Studio configuration to the config table |
+| `POST` | `/api/settings/llm/test` | Send a synthetic alert to the LLM and return the raw response |
 | `WS` | `/ws/alerts?token=<jwt>` | Live alert feed (subscribes to `alerts:enriched` Redis channel) |
 | `GET` | `/health` | Liveness check (no auth) |
 
@@ -144,8 +150,8 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, rule category management, notification router (HA push) |
-| `frontend` | ✅ | React PWA — live alert feed, stats dashboard, rule config UI with category toggles and Suricata reload |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, rule management, notification router (HA push) |
+| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, rule config, LLM + HA settings |
 
 ---
 
@@ -190,8 +196,128 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `SURICATA_DISABLE_CONF` | `/suricata/config/disable.conf` | Path inside the backend container to the disable.conf written by rule management |
 | `LM_STUDIO_URL` | — | LM Studio base URL (e.g. `http://192.168.1.x:1234/v1`) |
 | `LM_STUDIO_MODEL` | — | Model identifier (e.g. `gemma-4-27b`) |
+| `LM_ENRICHMENT_TIMEOUT` | `90` | LLM request timeout in seconds |
+| `LM_MAX_TOKENS` | `512` | Maximum tokens in the LLM response |
 | `PIHOLE_HOST` / `PIHOLE_PASSWORD` | — | Pi-hole v6 address and API password |
 | `HA_WEBHOOK_URL` | — | Home Assistant webhook URL (leave unset to disable push notifications) |
+| `DASHBOARD_URL` | — | Public URL of the raid_guard dashboard — used to generate deep links in HA notifications (e.g. `http://unraid:3000`) |
+
+---
+
+## Home Assistant integration
+
+raid_guard sends alert notifications to Home Assistant via a webhook. Each
+notification includes enough context to drive rich HA automations, and a deep
+link that opens the specific alert in the dashboard when the notification is
+tapped in the Companion App.
+
+### 1 — Create a webhook automation in HA
+
+In Home Assistant, go to **Settings → Automations → Create automation → Start
+from scratch**, then switch to YAML mode and paste:
+
+```yaml
+alias: raid_guard alert notification
+description: Forward raid_guard IDS alerts to mobile devices
+trigger:
+  - platform: webhook
+    webhook_id: raid_guard_alerts   # choose any unique ID
+    allowed_methods:
+      - POST
+    local_only: true                # only accept from the local network
+condition: []
+action:
+  - service: notify.mobile_app_your_phone   # replace with your device
+    data:
+      title: "{{ trigger.json.title }}"
+      message: "{{ trigger.json.message }}"
+      data:
+        url: "{{ trigger.json.url }}"       # tap → opens alert in dashboard
+        tag: "raid_guard_{{ trigger.json.alert_id }}"
+        group: raid_guard
+        color: >
+          {% if trigger.json.severity == 'critical' %}red
+          {% elif trigger.json.severity == 'warning' %}orange
+          {% else %}blue{% endif %}
+mode: queued
+max: 20
+```
+
+After saving, copy the webhook URL from the automation's trigger card. It
+looks like:
+
+```
+http://<ha-host>:8123/api/webhook/raid_guard_alerts
+```
+
+### 2 — Configure raid_guard
+
+Set the following in your `.env`:
+
+```bash
+HA_WEBHOOK_URL=http://<ha-host>:8123/api/webhook/raid_guard_alerts
+DASHBOARD_URL=http://<unraid-host>:3000
+```
+
+Rebuild and redeploy the backend, or just restart the backend container:
+
+```bash
+docker compose restart backend
+```
+
+### 3 — Set push threshold and verify
+
+In the raid_guard dashboard, go to **Config → Notifications**:
+
+- Use the toggle to enable or disable HA notifications at runtime (no restart needed).
+- Use **Send test** to fire a synthetic notification to HA immediately and confirm delivery.
+
+The push threshold (default: `warning`) controls the minimum severity that
+triggers a push. `info` alerts are always stored and visible in the dashboard
+but are not pushed unless you lower the threshold.
+
+### Webhook payload reference
+
+Every POST to your HA webhook contains these fields, accessible in automations
+as `trigger.json.<field>`:
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| `title` | `raid_guard — WARNING` | Notification title |
+| `message` | `Port scan detected from 192.168.1.5` | AI summary (if enriched) or signature + src IP |
+| `severity` | `warning` | `info` / `warning` / `critical` |
+| `signature` | `ET SCAN Potential SSH Scan` | Suricata rule name |
+| `src_ip` | `192.168.1.5` | Source IP address |
+| `timestamp` | `2026-04-11T14:32:00+00:00` | Alert timestamp (ISO 8601) |
+| `alert_id` | `a1b2c3d4-…` | UUID of the alert record |
+| `url` | `http://unraid:3000?alert=a1b2c3d4-…` | Deep link to the alert drawer (empty if `DASHBOARD_URL` not set) |
+
+### Advanced: severity-based routing
+
+You can split notifications by severity, for example to only wake you up for
+`critical` alerts:
+
+```yaml
+alias: raid_guard — critical only
+trigger:
+  - platform: webhook
+    webhook_id: raid_guard_alerts
+    allowed_methods: [POST]
+    local_only: true
+condition:
+  - condition: template
+    value_template: "{{ trigger.json.severity == 'critical' }}"
+action:
+  - service: notify.mobile_app_your_phone
+    data:
+      title: "{{ trigger.json.title }}"
+      message: "{{ trigger.json.message }}"
+      data:
+        url: "{{ trigger.json.url }}"
+        push:
+          sound: default
+          interruption-level: critical  # iOS — bypasses silent mode
+```
 
 ---
 
