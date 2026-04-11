@@ -181,7 +181,7 @@ async def test_ingest_alert_calls_db_insert():
 
 
 @pytest.mark.asyncio
-async def test_ingest_alert_publishes_to_redis():
+async def test_ingest_alert_publishes_to_alerts_raw():
     pool, conn = _make_mock_pool()
     redis_client = AsyncMock()
     redis_client.publish = AsyncMock()
@@ -191,12 +191,32 @@ async def test_ingest_alert_publishes_to_redis():
     alert = parse_alert(MINIMAL_ALERT_EVENT)
     await ingest_alert(alert, pool, redis_client)
 
-    redis_client.publish.assert_called_once()
-    channel, payload = redis_client.publish.call_args[0]
-    assert channel == ALERTS_RAW
-    data = json.loads(payload)
+    calls = redis_client.publish.call_args_list
+    raw_call = next((c for c in calls if c[0][0] == ALERTS_RAW), None)
+    assert raw_call is not None, "Expected a publish to alerts:raw"
+    data = json.loads(raw_call[0][1])
     assert data["signature"] == "ET MALWARE Cobalt Strike Beacon"
     assert data["severity"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_ingest_alert_publishes_to_alerts_enriched():
+    """Ingestor publishes the same payload to alerts:enriched so the WebSocket
+    live feed works before the AI enricher (RAID-013) is implemented."""
+    pool, conn = _make_mock_pool()
+    redis_client = AsyncMock()
+    redis_client.publish = AsyncMock()
+
+    from app.channels import ALERTS_ENRICHED
+
+    alert = parse_alert(MINIMAL_ALERT_EVENT)
+    await ingest_alert(alert, pool, redis_client)
+
+    calls = redis_client.publish.call_args_list
+    enriched_call = next((c for c in calls if c[0][0] == ALERTS_ENRICHED), None)
+    assert enriched_call is not None, "Expected a publish to alerts:enriched"
+    data = json.loads(enriched_call[0][1])
+    assert data["signature"] == "ET MALWARE Cobalt Strike Beacon"
 
 
 @pytest.mark.asyncio
