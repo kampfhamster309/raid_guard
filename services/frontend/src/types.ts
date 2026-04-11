@@ -52,3 +52,10 @@ export interface HaSettings {
   enabled: boolean;
   configured: boolean;
 }
+
+export interface LlmSettings {
+  url: string;
+  model: string;
+  timeout: number;
+  max_tokens: number;
+}

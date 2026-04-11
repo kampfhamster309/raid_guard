@@ -14,6 +14,8 @@ const CATEGORIES = [
 const HA_CONFIGURED: api.HaSettings = { enabled: true, configured: true };
 const HA_NOT_CONFIGURED: api.HaSettings = { enabled: false, configured: false };
 
+const LLM_SETTINGS = { url: "http://lmstudio:1234/v1", model: "gemma-4-27b", timeout: 90, max_tokens: 512 };
+
 beforeEach(() => {
   vi.mocked(api.fetchRuleCategories).mockResolvedValue(CATEGORIES);
   vi.mocked(api.updateRuleCategories).mockResolvedValue(CATEGORIES);
@@ -21,6 +23,9 @@ beforeEach(() => {
   vi.mocked(api.fetchHaSettings).mockResolvedValue(HA_CONFIGURED);
   vi.mocked(api.updateHaSettings).mockResolvedValue({ enabled: false, configured: true });
   vi.mocked(api.testHaSend).mockResolvedValue(undefined);
+  vi.mocked(api.fetchLlmSettings).mockResolvedValue(LLM_SETTINGS);
+  vi.mocked(api.updateLlmSettings).mockResolvedValue(LLM_SETTINGS);
+  vi.mocked(api.testLlm).mockResolvedValue({ content: '{"summary":"test","severity_reasoning":"ok","recommended_action":"nothing"}' });
 });
 
 // ── Rule Categories ───────────────────────────────────────────────────────────
@@ -86,13 +91,93 @@ describe("ConfigPage — Rule Categories", () => {
   });
 });
 
+// ── AI Enrichment ─────────────────────────────────────────────────────────────
+
+describe("ConfigPage — AI Enrichment", () => {
+  it("renders LLM settings fields with loaded values", async () => {
+    render(<ConfigPage />);
+    const urlInput = await screen.findByPlaceholderText(/192.168.1.x:1234/);
+    expect(urlInput).toHaveValue("http://lmstudio:1234/v1");
+    expect(screen.getByPlaceholderText("gemma-4-27b")).toHaveValue("gemma-4-27b");
+  });
+
+  it("calls updateLlmSettings when Save is clicked", async () => {
+    render(<ConfigPage />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(api.updateLlmSettings).toHaveBeenCalledWith(LLM_SETTINGS);
+    });
+  });
+
+  it("shows success message after save", async () => {
+    render(<ConfigPage />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await screen.findByText(/settings saved/i);
+  });
+
+  it("shows error message when save fails", async () => {
+    vi.mocked(api.updateLlmSettings).mockRejectedValue(new Error("DB error"));
+    render(<ConfigPage />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await screen.findByText("DB error");
+  });
+
+  it("calls testLlm when Send test prompt is clicked", async () => {
+    render(<ConfigPage />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /send test prompt/i }));
+
+    await waitFor(() => {
+      expect(api.testLlm).toHaveBeenCalled();
+    });
+  });
+
+  it("renders pretty-printed JSON response after successful test", async () => {
+    render(<ConfigPage />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /send test prompt/i }));
+
+    await screen.findByText(/LLM response/i);
+    expect(screen.getByText(/"summary"/)).toBeInTheDocument();
+  });
+
+  it("renders error content when test fails", async () => {
+    vi.mocked(api.testLlm).mockRejectedValue(new Error("Connection refused"));
+    render(<ConfigPage />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /send test prompt/i }));
+
+    await screen.findByText("Connection refused");
+  });
+
+  it("disables Send test prompt button when URL/model are empty", async () => {
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 });
+    render(<ConfigPage />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    expect(screen.getByRole("button", { name: /send test prompt/i })).toBeDisabled();
+  });
+});
+
 // ── Home Assistant ────────────────────────────────────────────────────────────
 
 describe("ConfigPage — Home Assistant", () => {
   it("renders HA section with toggle and Send test button when configured", async () => {
     render(<ConfigPage />);
     await screen.findByText("Home Assistant");
-    expect(screen.getByRole("button", { name: /send test/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^send test$/i })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: /home assistant notifications/i })).toBeInTheDocument();
   });
 
@@ -118,14 +203,14 @@ describe("ConfigPage — Home Assistant", () => {
     vi.mocked(api.fetchHaSettings).mockResolvedValue(HA_NOT_CONFIGURED);
     render(<ConfigPage />);
     await screen.findByText("Home Assistant");
-    expect(screen.queryByRole("button", { name: /send test/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^send test$/i })).not.toBeInTheDocument();
   });
 
   it("calls testHaSend when Send test is clicked", async () => {
     render(<ConfigPage />);
     await screen.findByText("Home Assistant");
 
-    fireEvent.click(screen.getByRole("button", { name: /send test/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^send test$/i }));
 
     await waitFor(() => {
       expect(api.testHaSend).toHaveBeenCalled();
@@ -136,7 +221,7 @@ describe("ConfigPage — Home Assistant", () => {
     render(<ConfigPage />);
     await screen.findByText("Home Assistant");
 
-    fireEvent.click(screen.getByRole("button", { name: /send test/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^send test$/i }));
 
     await screen.findByText("Test notification sent.");
   });
@@ -146,7 +231,7 @@ describe("ConfigPage — Home Assistant", () => {
     render(<ConfigPage />);
     await screen.findByText("Home Assistant");
 
-    fireEvent.click(screen.getByRole("button", { name: /send test/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^send test$/i }));
 
     await screen.findByText("Connection refused");
   });

@@ -1,13 +1,61 @@
 import { useEffect, useState } from "react";
-import { fetchHaSettings, updateHaSettings, testHaSend } from "../api";
+import { fetchHaSettings, fetchLlmSettings, testHaSend, testLlm, updateHaSettings, updateLlmSettings } from "../api";
 import { useRules } from "../hooks/useRules";
-import type { HaSettings } from "../types";
+import type { HaSettings, LlmSettings } from "../types";
 
 type TestStatus = "idle" | "sending" | "success" | "error";
 
 export function ConfigPage() {
   const { categories, loading, error, reloadStatus, reloadMessage, toggleCategory, reload } =
     useRules();
+
+  // ── LLM settings ──────────────────────────────────────────────────────────
+  const [llmSettings, setLlmSettings] = useState<LlmSettings | null>(null);
+  const [llmDraft, setLlmDraft] = useState<LlmSettings | null>(null);
+  const [llmSaveStatus, setLlmSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [llmSaveMessage, setLlmSaveMessage] = useState<string | null>(null);
+  const [llmTestStatus, setLlmTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
+  const [llmTestContent, setLlmTestContent] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchLlmSettings()
+      .then((s) => { setLlmSettings(s); setLlmDraft(s); })
+      .catch(() => {});
+  }, []);
+
+  const saveLlm = async () => {
+    if (!llmDraft) return;
+    setLlmSaveStatus("saving");
+    setLlmSaveMessage(null);
+    try {
+      const updated = await updateLlmSettings(llmDraft);
+      setLlmSettings(updated);
+      setLlmDraft(updated);
+      setLlmSaveStatus("success");
+      setLlmSaveMessage("Settings saved. Restart the backend container for the enricher to pick up the new config.");
+    } catch (e) {
+      setLlmSaveStatus("error");
+      setLlmSaveMessage(e instanceof Error ? e.message : "Save failed");
+    }
+  };
+
+  const runLlmTest = async () => {
+    setLlmTestStatus("testing");
+    setLlmTestContent(null);
+    try {
+      const { content } = await testLlm();
+      setLlmTestStatus("success");
+      // Pretty-print if valid JSON, otherwise show raw
+      try {
+        setLlmTestContent(JSON.stringify(JSON.parse(content), null, 2));
+      } catch {
+        setLlmTestContent(content);
+      }
+    } catch (e) {
+      setLlmTestStatus("error");
+      setLlmTestContent(e instanceof Error ? e.message : "Test failed");
+    }
+  };
 
   // ── Home Assistant settings ────────────────────────────────────────────────
   const [haSettings, setHaSettings] = useState<HaSettings | null>(null);
@@ -115,6 +163,115 @@ export function ConfigPage() {
               ))}
             </div>
           )}
+        </section>
+
+        {/* ── AI Enrichment ──────────────────────────────────────────────── */}
+        <section>
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-slate-100">AI Enrichment</h2>
+            <p className="text-sm text-slate-400 mt-0.5">
+              LM Studio connection settings for per-alert AI analysis. Save changes, then restart the backend container for the enricher to use the new config.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-slate-700 p-4 space-y-4">
+            {llmDraft === null ? (
+              <p className="text-slate-400 text-sm">Loading…</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1">LM Studio base URL</label>
+                    <input
+                      type="text"
+                      value={llmDraft.url}
+                      onChange={(e) => setLlmDraft({ ...llmDraft, url: e.target.value })}
+                      placeholder="http://192.168.1.x:1234/v1"
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1">Model name</label>
+                    <input
+                      type="text"
+                      value={llmDraft.model}
+                      onChange={(e) => setLlmDraft({ ...llmDraft, model: e.target.value })}
+                      placeholder="gemma-4-27b"
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Request timeout (seconds)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={600}
+                      value={llmDraft.timeout}
+                      onChange={(e) => setLlmDraft({ ...llmDraft, timeout: Number(e.target.value) })}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Max response tokens</label>
+                    <input
+                      type="number"
+                      min={64}
+                      max={4096}
+                      value={llmDraft.max_tokens}
+                      onChange={(e) => setLlmDraft({ ...llmDraft, max_tokens: Number(e.target.value) })}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 pt-1">
+                  <button
+                    onClick={() => void saveLlm()}
+                    disabled={llmSaveStatus === "saving"}
+                    className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                  >
+                    {llmSaveStatus === "saving" ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    onClick={() => void runLlmTest()}
+                    disabled={llmTestStatus === "testing" || !llmSettings?.url || !llmSettings?.model}
+                    className="px-4 py-2 rounded text-sm font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-slate-200"
+                  >
+                    {llmTestStatus === "testing" ? "Testing…" : "Send test prompt"}
+                  </button>
+                </div>
+
+                {llmSaveMessage && (
+                  <div
+                    className={`rounded px-3 py-2 text-xs ${
+                      llmSaveStatus === "success"
+                        ? "bg-emerald-900/50 text-emerald-300 border border-emerald-700"
+                        : "bg-red-900/50 text-red-300 border border-red-700"
+                    }`}
+                  >
+                    {llmSaveMessage}
+                  </div>
+                )}
+
+                {llmTestContent !== null && (
+                  <div>
+                    <p className="text-xs text-slate-400 mb-1">
+                      {llmTestStatus === "success" ? "LLM response:" : "Error:"}
+                    </p>
+                    <pre
+                      className={`rounded p-3 text-xs overflow-x-auto whitespace-pre-wrap break-all ${
+                        llmTestStatus === "success"
+                          ? "bg-slate-800 text-slate-300"
+                          : "bg-red-900/30 text-red-300 border border-red-700"
+                      }`}
+                    >
+                      {llmTestContent}
+                    </pre>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </section>
 
         {/* ── Notifications ──────────────────────────────────────────────── */}

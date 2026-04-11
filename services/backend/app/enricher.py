@@ -27,11 +27,11 @@ Alerts are processed one at a time (``await _enrich_one(...)`` before the next
 import asyncio
 import json
 import logging
-import os
 
 from openai import AsyncOpenAI
 
 from .channels import ALERTS_ENRICHED, ALERTS_RAW
+from .llm_config import get_llm_config
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,26 @@ Do not include any text, markdown, or code fences outside the JSON object.\
 """
 
 
+# Shared response-format schema — used by both the enricher and the test endpoint.
+_ENRICHMENT_RESPONSE_FORMAT: dict = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "alert_enrichment",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "severity_reasoning": {"type": "string"},
+                "recommended_action": {"type": "string"},
+            },
+            "required": ["summary", "severity_reasoning", "recommended_action"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
 def _build_user_prompt(alert: dict) -> str:
     return (
         "Analyse this Suricata IDS alert:\n\n"
@@ -83,6 +103,7 @@ async def _call_llm(
     alert: dict,
     model: str,
     timeout: float,
+    max_tokens: int = 512,
 ) -> dict | None:
     """Call LM Studio and return the parsed enrichment dict, or ``None`` on any failure."""
     try:
@@ -93,9 +114,9 @@ async def _call_llm(
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": _build_user_prompt(alert)},
                 ],
-                response_format={"type": "json_object"},
+                response_format=_ENRICHMENT_RESPONSE_FORMAT,
                 temperature=0.1,
-                max_tokens=512,
+                max_tokens=max_tokens,
             ),
             timeout=timeout,
         )
@@ -130,9 +151,10 @@ async def _enrich_one(
     alert: dict,
     model: str,
     timeout: float,
+    max_tokens: int = 512,
 ) -> None:
     """Enrich one alert and publish to ``alerts:enriched``.  Never raises."""
-    enrichment = await _call_llm(client, alert, model, timeout)
+    enrichment = await _call_llm(client, alert, model, timeout, max_tokens)
 
     output = dict(alert)
     if enrichment:
@@ -169,14 +191,19 @@ async def run_enricher(redis_client, pool) -> None:
     ``LM_ENRICHMENT_TIMEOUT`` from environment variables.  Falls back to
     transparent passthrough if the LLM is not configured.
     """
-    lm_url = os.environ.get("LM_STUDIO_URL", "").strip()
-    model = os.environ.get("LM_STUDIO_MODEL", "").strip()
-    timeout = float(os.environ.get("LM_ENRICHMENT_TIMEOUT", "30"))
+    cfg = await get_llm_config(pool)
+    lm_url = cfg["url"]
+    model = cfg["model"]
+    timeout = float(cfg["timeout"])
+    max_tokens = int(cfg["max_tokens"])
 
     client: AsyncOpenAI | None = None
     if lm_url and model:
         client = AsyncOpenAI(base_url=lm_url, api_key="lm-studio")
-        logger.info("AI enricher started — model=%s, timeout=%.0fs", model, timeout)
+        logger.info(
+            "AI enricher started — model=%s, timeout=%.0fs, max_tokens=%d",
+            model, timeout, max_tokens,
+        )
     else:
         logger.info(
             "AI enricher: LM_STUDIO_URL/LM_STUDIO_MODEL not set; "
@@ -199,7 +226,7 @@ async def run_enricher(redis_client, pool) -> None:
 
             if client is not None:
                 # Serialised: await fully before processing the next message
-                await _enrich_one(client, redis_client, pool, alert, model, timeout)
+                await _enrich_one(client, redis_client, pool, alert, model, timeout, max_tokens)
             else:
                 # Passthrough: forward unchanged so WebSocket + notification router work
                 try:

@@ -1,4 +1,4 @@
-import type { Alert, HaSettings, RuleCategory, Stats } from "./types";
+import type { Alert, HaSettings, LlmSettings, RuleCategory, Stats } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -132,6 +132,27 @@ export async function updateHaSettings(enabled: boolean): Promise<HaSettings> {
 
 export async function testHaSend(): Promise<void> {
   await authFetch("/api/settings/ha/test", { method: "POST" });
+}
+
+// ── LLM settings API ──────────────────────────────────────────────────────────
+
+export async function fetchLlmSettings(): Promise<LlmSettings> {
+  const res = await authFetch("/api/settings/llm");
+  return res.json() as Promise<LlmSettings>;
+}
+
+export async function updateLlmSettings(settings: LlmSettings): Promise<LlmSettings> {
+  const res = await authFetch("/api/settings/llm", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  return res.json() as Promise<LlmSettings>;
+}
+
+export async function testLlm(): Promise<{ content: string }> {
+  const res = await authFetch("/api/settings/llm/test", { method: "POST" });
+  return res.json() as Promise<{ content: string }>;
 }
 
 export function createAlertWebSocket(token: string): WebSocket {

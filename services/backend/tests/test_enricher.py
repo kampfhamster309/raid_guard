@@ -41,6 +41,7 @@ _GOOD_ENRICHMENT = {
 def _make_pool():
     conn = AsyncMock()
     conn.execute = AsyncMock()
+    conn.fetch = AsyncMock(return_value=[])  # empty config table → env-var fallback
     pool = MagicMock()
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
