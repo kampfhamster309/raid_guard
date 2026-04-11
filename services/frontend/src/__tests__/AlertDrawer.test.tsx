@@ -14,7 +14,14 @@ const ALERT: Alert = {
   signature_id: 2001219,
   category: "Attempted Information Leak",
   severity: "warning",
+  enrichment_json: null,
   raw_json: { event_type: "alert", src_ip: "10.0.0.1" },
+};
+
+const ENRICHMENT = {
+  summary: "Port scan detected from internal host",
+  severity_reasoning: "Warning is appropriate for an internal scan with no confirmed compromise.",
+  recommended_action: "Verify whether this device runs a legitimate network scanner.",
 };
 
 describe("AlertDrawer", () => {
@@ -62,5 +69,19 @@ describe("AlertDrawer", () => {
     render(<AlertDrawer alert={null} onClose={onClose} />);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("renders AI Analysis section when enrichment_json is present", () => {
+    const enrichedAlert = { ...ALERT, enrichment_json: ENRICHMENT };
+    render(<AlertDrawer alert={enrichedAlert} onClose={vi.fn()} />);
+    expect(screen.getByText("AI Analysis")).toBeInTheDocument();
+    expect(screen.getByText(ENRICHMENT.summary)).toBeInTheDocument();
+    expect(screen.getByText(ENRICHMENT.severity_reasoning)).toBeInTheDocument();
+    expect(screen.getByText(ENRICHMENT.recommended_action)).toBeInTheDocument();
+  });
+
+  it("does not render AI Analysis section when enrichment_json is null", () => {
+    render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);
+    expect(screen.queryByText("AI Analysis")).not.toBeInTheDocument();
   });
 });

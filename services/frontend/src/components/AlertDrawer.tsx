@@ -77,6 +77,28 @@ export function AlertDrawer({ alert, onClose }: Props) {
             </div>
           </section>
 
+          {alert.enrichment_json && (
+            <section>
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                AI Analysis
+              </h2>
+              <div className="bg-slate-800 rounded p-3 space-y-3">
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Summary</p>
+                  <p className="text-sm text-slate-200">{alert.enrichment_json.summary}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Severity reasoning</p>
+                  <p className="text-sm text-slate-300">{alert.enrichment_json.severity_reasoning}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500 mb-1">Recommended action</p>
+                  <p className="text-sm text-indigo-300">{alert.enrichment_json.recommended_action}</p>
+                </div>
+              </div>
+            </section>
+          )}
+
           {alert.raw_json && (
             <section>
               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">

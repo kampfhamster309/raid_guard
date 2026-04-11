@@ -1,5 +1,11 @@
 export type Severity = "info" | "warning" | "critical";
 
+export interface AlertEnrichment {
+  summary: string;
+  severity_reasoning: string;
+  recommended_action: string;
+}
+
 export interface Alert {
   id: string;
   timestamp: string;
@@ -12,6 +18,7 @@ export interface Alert {
   signature_id: number | null;
   category: string | null;
   severity: Severity;
+  enrichment_json: AlertEnrichment | null;
   raw_json: Record<string, unknown> | null;
 }
 

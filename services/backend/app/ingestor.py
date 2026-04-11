@@ -21,7 +21,7 @@ from typing import AsyncGenerator
 import asyncpg
 import redis.asyncio as aioredis
 
-from .channels import ALERTS_ENRICHED, ALERTS_RAW
+from .channels import ALERTS_RAW
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ async def ingest_alert(
     ts = _parse_timestamp(alert.get("timestamp"))
 
     async with pool.acquire() as conn:
-        await conn.execute(
+        row = await conn.fetchrow(
             """
             INSERT INTO alerts (
                 timestamp, src_ip, dst_ip, src_port, dst_port,
@@ -115,6 +115,7 @@ async def ingest_alert(
                 $10::severity_level,
                 $11::jsonb
             )
+            RETURNING id
             """,
             ts,
             alert.get("src_ip"),
@@ -131,16 +132,10 @@ async def ingest_alert(
 
     payload = json.dumps(
         {k: v for k, v in alert.items() if k != "raw_json"}
-        | {"raw_json": alert["raw_json"]},
+        | {"raw_json": alert["raw_json"], "id": str(row["id"])},
         default=str,
     )
     await redis_client.publish(ALERTS_RAW, payload)
-    # Until the AI enricher (RAID-013) is running it never re-publishes to
-    # alerts:enriched, so the WebSocket broadcaster would receive nothing.
-    # Publish the raw alert there too as a passthrough so the live feed works.
-    # RAID-013 will intercept alerts:raw, enrich, and re-publish to
-    # alerts:enriched; at that point this line can be removed.
-    await redis_client.publish(ALERTS_ENRICHED, payload)
 
     logger.debug(
         "Ingested alert sig_id=%s severity=%s",

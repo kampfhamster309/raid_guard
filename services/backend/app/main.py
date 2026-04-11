@@ -10,6 +10,7 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from .auth import decode_token
 from .backends.homeassistant import HomeAssistantBackend
 from .channels import ALERTS_ENRICHED, get_redis_url
+from .enricher import run_enricher
 from .ingestor import ingestor_loop
 from .notification_router import run_notification_router
 from .routers import alerts, auth, rules, settings, stats
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI):
     app.state.redis = redis_client
 
     ingestor_task = asyncio.create_task(ingestor_loop(pool, redis_client))
+    enrich_task = asyncio.create_task(run_enricher(redis_client, pool))
 
     backends = [b for b in [HomeAssistantBackend.from_env(pool)] if b is not None]
     notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
@@ -45,8 +47,9 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         ingestor_task.cancel()
+        enrich_task.cancel()
         notif_task.cancel()
-        await asyncio.gather(ingestor_task, notif_task, return_exceptions=True)
+        await asyncio.gather(ingestor_task, enrich_task, notif_task, return_exceptions=True)
         await redis_client.aclose()
         await pool.close()
 

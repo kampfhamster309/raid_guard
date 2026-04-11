@@ -8,6 +8,7 @@ covered by the integration tests (test_ingestor_integration.sh).
 
 import asyncio
 import json
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -155,11 +156,14 @@ def test_parse_timestamp_invalid_string_returns_utc_now():
 # ── ingest_alert: mock-based ──────────────────────────────────────────────────
 
 
+_MOCK_ALERT_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 def _make_mock_pool():
     conn = AsyncMock()
-    conn.execute = AsyncMock()
+    # INSERT ... RETURNING id uses fetchrow
+    conn.fetchrow = AsyncMock(return_value={"id": _MOCK_ALERT_ID})
     pool = MagicMock()
-    # pool.acquire() is used as an async context manager
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
     return pool, conn
@@ -174,10 +178,10 @@ async def test_ingest_alert_calls_db_insert():
     alert = parse_alert(MINIMAL_ALERT_EVENT)
     await ingest_alert(alert, pool, redis_client)
 
-    conn.execute.assert_called_once()
-    call_args = conn.execute.call_args
-    # First arg is the SQL string; positional params follow
+    conn.fetchrow.assert_called_once()
+    call_args = conn.fetchrow.call_args
     assert "INSERT INTO alerts" in call_args[0][0]
+    assert "RETURNING id" in call_args[0][0]
 
 
 @pytest.mark.asyncio
@@ -197,12 +201,13 @@ async def test_ingest_alert_publishes_to_alerts_raw():
     data = json.loads(raw_call[0][1])
     assert data["signature"] == "ET MALWARE Cobalt Strike Beacon"
     assert data["severity"] == "critical"
+    assert data["id"] == str(_MOCK_ALERT_ID)
 
 
 @pytest.mark.asyncio
-async def test_ingest_alert_publishes_to_alerts_enriched():
-    """Ingestor publishes the same payload to alerts:enriched so the WebSocket
-    live feed works before the AI enricher (RAID-013) is implemented."""
+async def test_ingest_alert_publishes_only_to_alerts_raw():
+    """With RAID-013 in place the ingestor only publishes to alerts:raw.
+    The enricher reads from alerts:raw and publishes to alerts:enriched."""
     pool, conn = _make_mock_pool()
     redis_client = AsyncMock()
     redis_client.publish = AsyncMock()
@@ -212,11 +217,9 @@ async def test_ingest_alert_publishes_to_alerts_enriched():
     alert = parse_alert(MINIMAL_ALERT_EVENT)
     await ingest_alert(alert, pool, redis_client)
 
-    calls = redis_client.publish.call_args_list
-    enriched_call = next((c for c in calls if c[0][0] == ALERTS_ENRICHED), None)
-    assert enriched_call is not None, "Expected a publish to alerts:enriched"
-    data = json.loads(enriched_call[0][1])
-    assert data["signature"] == "ET MALWARE Cobalt Strike Beacon"
+    calls = [c[0][0] for c in redis_client.publish.call_args_list]
+    assert ALERTS_ENRICHED not in calls, "Ingestor must not publish directly to alerts:enriched"
+    assert redis_client.publish.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -227,7 +230,7 @@ async def test_ingest_alert_passes_severity_as_string():
     redis_client.publish = AsyncMock()
 
     for priority, expected in [(1, "critical"), (2, "warning"), (3, "info")]:
-        conn.execute.reset_mock()
+        conn.fetchrow.reset_mock()
         event = {
             **MINIMAL_ALERT_EVENT,
             "alert": {**MINIMAL_ALERT_EVENT["alert"], "severity": priority},
@@ -235,8 +238,8 @@ async def test_ingest_alert_passes_severity_as_string():
         alert = parse_alert(event)
         await ingest_alert(alert, pool, redis_client)
 
-        # The severity value passed to execute should be the string enum label
-        args = conn.execute.call_args[0]
+        # The severity value passed to fetchrow should be the string enum label
+        args = conn.fetchrow.call_args[0]
         # args[0] is SQL, args[1:] are positional params; severity is $10
         assert args[10] == expected
 
@@ -251,7 +254,7 @@ async def test_ingest_alert_raw_json_is_serialised():
     alert = parse_alert(MINIMAL_ALERT_EVENT)
     await ingest_alert(alert, pool, redis_client)
 
-    args = conn.execute.call_args[0]
+    args = conn.fetchrow.call_args[0]
     raw_json_param = args[11]  # $11 in the INSERT
     assert isinstance(raw_json_param, str)
     parsed = json.loads(raw_json_param)
