@@ -27,6 +27,8 @@ beforeEach(() => {
   vi.mocked(api.updateLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.testLlm).mockResolvedValue({ content: '{"summary":"test","severity_reasoning":"ok","recommended_action":"nothing"}' });
   vi.mocked(api.fetchTuningSuggestions).mockResolvedValue([]);
+  vi.mocked(api.fetchPiholeSettings).mockResolvedValue({ url: "http://pihole:80", enabled: true, configured: true });
+  vi.mocked(api.updatePiholeSettings).mockResolvedValue({ url: "http://pihole:80", enabled: true, configured: true });
 });
 
 // ── Rule Categories ───────────────────────────────────────────────────────────
@@ -106,7 +108,8 @@ describe("ConfigPage — AI Enrichment", () => {
     render(<ConfigPage />);
     await screen.findByPlaceholderText(/192.168.1.x:1234/);
 
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    // First Save button in DOM belongs to the LLM section (Pi-hole Save comes later)
+    fireEvent.click(screen.getAllByRole("button", { name: /^save$/i })[0]);
 
     await waitFor(() => {
       expect(api.updateLlmSettings).toHaveBeenCalledWith(LLM_SETTINGS);
@@ -117,7 +120,7 @@ describe("ConfigPage — AI Enrichment", () => {
     render(<ConfigPage />);
     await screen.findByPlaceholderText(/192.168.1.x:1234/);
 
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^save$/i })[0]);
 
     await screen.findByText(/settings saved/i);
   });
@@ -127,7 +130,7 @@ describe("ConfigPage — AI Enrichment", () => {
     render(<ConfigPage />);
     await screen.findByPlaceholderText(/192.168.1.x:1234/);
 
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: /^save$/i })[0]);
 
     await screen.findByText("DB error");
   });

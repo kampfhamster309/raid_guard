@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { Alert } from "../types";
 import { SeverityBadge } from "./SeverityBadge";
+import { blockDomain, fetchPiholeSettings } from "../api";
 
 interface Props {
   alert: Alert | null;
@@ -18,7 +19,25 @@ function Row({ label, value }: { label: string; value: string | number | null | 
   );
 }
 
+/** Try to extract a queried domain from EVE JSON (DNS events). */
+function extractDomain(rawJson: Record<string, unknown> | null): string {
+  if (!rawJson) return "";
+  const dns = rawJson.dns as Record<string, unknown> | undefined;
+  if (dns) {
+    const query = dns.query as Array<{ rrname?: string }> | undefined;
+    if (Array.isArray(query) && query[0]?.rrname) return String(query[0].rrname);
+    if (typeof dns.rrname === "string") return dns.rrname;
+  }
+  return "";
+}
+
 export function AlertDrawer({ alert, onClose }: Props) {
+  const [piholeConfigured, setPiholeConfigured] = useState(false);
+  const [blockInput, setBlockInput] = useState("");
+  const [blocking, setBlocking] = useState(false);
+  const [blockStatus, setBlockStatus] = useState<"idle" | "success" | "error">("idle");
+  const [blockMessage, setBlockMessage] = useState<string | null>(null);
+
   useEffect(() => {
     if (!alert) return;
     const handler = (e: KeyboardEvent) => {
@@ -27,6 +46,36 @@ export function AlertDrawer({ alert, onClose }: Props) {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [alert, onClose]);
+
+  // Load Pi-hole config and pre-fill domain whenever a new alert is opened.
+  useEffect(() => {
+    if (!alert) return;
+    setBlockStatus("idle");
+    setBlockMessage(null);
+    setBlockInput(extractDomain(alert.raw_json));
+
+    fetchPiholeSettings()
+      .then((s) => setPiholeConfigured(s.configured && s.enabled))
+      .catch(() => setPiholeConfigured(false));
+  }, [alert]);
+
+  const handleBlock = async () => {
+    const domain = blockInput.trim();
+    if (!domain) return;
+    setBlocking(true);
+    setBlockStatus("idle");
+    setBlockMessage(null);
+    try {
+      await blockDomain(domain);
+      setBlockStatus("success");
+      setBlockMessage(`${domain} added to Pi-hole deny list.`);
+    } catch (e) {
+      setBlockStatus("error");
+      setBlockMessage(e instanceof Error ? e.message : "Block failed");
+    } finally {
+      setBlocking(false);
+    }
+  };
 
   if (!alert) return null;
 
@@ -95,6 +144,46 @@ export function AlertDrawer({ alert, onClose }: Props) {
                   <p className="text-xs text-slate-500 mb-1">Recommended action</p>
                   <p className="text-sm text-indigo-300">{alert.enrichment_json.recommended_action}</p>
                 </div>
+              </div>
+            </section>
+          )}
+
+          {/* Pi-hole block domain */}
+          {piholeConfigured && (
+            <section>
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Block Domain
+              </h2>
+              <div className="bg-slate-800 rounded p-3 space-y-2">
+                <p className="text-xs text-slate-400">
+                  Add a domain to Pi-hole's deny list (DNS sinkhole).
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={blockInput}
+                    onChange={(e) => setBlockInput(e.target.value)}
+                    placeholder="example.com"
+                    aria-label="Domain to block"
+                    className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    onClick={() => void handleBlock()}
+                    disabled={blocking || !blockInput.trim() || blockStatus === "success"}
+                    className="px-3 py-1.5 text-xs font-medium rounded bg-red-700 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                  >
+                    {blocking ? "Blocking…" : "Block"}
+                  </button>
+                </div>
+                {blockMessage && (
+                  <p
+                    className={`text-xs ${
+                      blockStatus === "success" ? "text-emerald-400" : "text-red-400"
+                    }`}
+                  >
+                    {blockMessage}
+                  </p>
+                )}
               </div>
             </section>
           )}

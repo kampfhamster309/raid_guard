@@ -1,4 +1,4 @@
-import type { Alert, Digest, HaSettings, Incident, IncidentDetail, LlmSettings, RuleCategory, Stats, TuningSuggestion } from "./types";
+import type { Alert, BlockedDomain, Digest, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -208,6 +208,46 @@ export async function generateDigest(): Promise<Digest | null> {
   }
   if (!res.ok) throw new Error(`POST /api/digests/generate failed: ${res.status}`);
   return res.json() as Promise<Digest>;
+}
+
+// ── Pi-hole API ───────────────────────────────────────────────────────────────
+
+export async function fetchPiholeSettings(): Promise<PiholeSettings> {
+  const res = await authFetch("/api/pihole/settings");
+  return res.json() as Promise<PiholeSettings>;
+}
+
+export interface UpdatePiholeSettingsParams {
+  url: string;
+  enabled: boolean;
+  password: string;
+}
+
+export async function updatePiholeSettings(params: UpdatePiholeSettingsParams): Promise<PiholeSettings> {
+  const res = await authFetch("/api/pihole/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  return res.json() as Promise<PiholeSettings>;
+}
+
+export async function fetchBlocklist(): Promise<BlockedDomain[]> {
+  const res = await authFetch("/api/pihole/blocklist");
+  return res.json() as Promise<BlockedDomain[]>;
+}
+
+export async function blockDomain(domain: string, comment?: string): Promise<BlockedDomain> {
+  const res = await authFetch("/api/pihole/block", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ domain, comment: comment ?? "Blocked by raid_guard" }),
+  });
+  return res.json() as Promise<BlockedDomain>;
+}
+
+export async function unblockDomain(domain: string): Promise<void> {
+  await authFetch(`/api/pihole/block/${encodeURIComponent(domain)}`, { method: "DELETE" });
 }
 
 // ── Tuning API ────────────────────────────────────────────────────────────────

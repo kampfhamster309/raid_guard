@@ -94,6 +94,19 @@ export interface DigestContent {
   recommended_actions: string[];
 }
 
+export interface PiholeSettings {
+  url: string;
+  enabled: boolean;
+  configured: boolean;
+}
+
+export interface BlockedDomain {
+  domain: string;
+  comment: string;
+  added_at: number | null; // Unix timestamp from Pi-hole
+  enabled: boolean;
+}
+
 export type TuningAction = "suppress" | "threshold-adjust" | "keep";
 export type TuningStatus = "pending" | "confirmed" | "dismissed";
 

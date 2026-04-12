@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { fetchHaSettings, fetchLlmSettings, testHaSend, testLlm, updateHaSettings, updateLlmSettings } from "../api";
+import { fetchHaSettings, fetchLlmSettings, fetchPiholeSettings, testHaSend, testLlm, updateHaSettings, updateLlmSettings, updatePiholeSettings } from "../api";
 import { useRules } from "../hooks/useRules";
-import type { HaSettings, LlmSettings } from "../types";
+import type { HaSettings, LlmSettings, PiholeSettings } from "../types";
 import { TuningSuggestionsSection } from "./TuningSuggestionsSection";
 
 type TestStatus = "idle" | "sending" | "success" | "error";
@@ -55,6 +55,55 @@ export function ConfigPage() {
     } catch (e) {
       setLlmTestStatus("error");
       setLlmTestContent(e instanceof Error ? e.message : "Test failed");
+    }
+  };
+
+  // ── Pi-hole settings ───────────────────────────────────────────────────────
+  const [piholeSettings, setPiholeSettings] = useState<PiholeSettings | null>(null);
+  const [piholeDraft, setPiholeDraft] = useState<{ url: string; password: string } | null>(null);
+  const [piholeSaveStatus, setPiholeSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [piholeSaveMessage, setPiholeSaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPiholeSettings()
+      .then((s) => {
+        setPiholeSettings(s);
+        setPiholeDraft({ url: s.url, password: "" });
+      })
+      .catch(() => {});
+  }, []);
+
+  const savePihole = async () => {
+    if (!piholeDraft || !piholeSettings) return;
+    setPiholeSaveStatus("saving");
+    setPiholeSaveMessage(null);
+    try {
+      const updated = await updatePiholeSettings({
+        url: piholeDraft.url,
+        enabled: piholeSettings.enabled,
+        password: piholeDraft.password,
+      });
+      setPiholeSettings(updated);
+      setPiholeDraft((d) => d ? { ...d, password: "" } : d);
+      setPiholeSaveStatus("success");
+      setPiholeSaveMessage("Pi-hole settings saved.");
+    } catch (e) {
+      setPiholeSaveStatus("error");
+      setPiholeSaveMessage(e instanceof Error ? e.message : "Save failed");
+    }
+  };
+
+  const togglePihole = async () => {
+    if (!piholeSettings || !piholeDraft) return;
+    try {
+      const updated = await updatePiholeSettings({
+        url: piholeSettings.url,
+        enabled: !piholeSettings.enabled,
+        password: "",
+      });
+      setPiholeSettings(updated);
+    } catch {
+      // leave state unchanged
     }
   };
 
@@ -343,6 +392,97 @@ export function ConfigPage() {
                 </div>
               )}
             </div>
+          </div>
+        </section>
+
+        {/* ── Pi-hole Sinkhole ───────────────────────────────────────────── */}
+        <section>
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-slate-100">Pi-hole Sinkhole</h2>
+            <p className="text-sm text-slate-400 mt-0.5">
+              DNS sinkhole via Pi-hole v6. Set the base URL and admin password, then
+              use the Sinkhole tab to manage blocked domains.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-slate-700 p-4 space-y-4">
+            {piholeDraft === null ? (
+              <p className="text-slate-400 text-sm">Loading…</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1">Pi-hole base URL</label>
+                    <input
+                      type="text"
+                      value={piholeDraft.url}
+                      onChange={(e) => setPiholeDraft({ ...piholeDraft, url: e.target.value })}
+                      placeholder="http://192.168.178.3"
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs text-slate-400 mb-1">Admin password</label>
+                    <input
+                      type="password"
+                      value={piholeDraft.password}
+                      onChange={(e) => setPiholeDraft({ ...piholeDraft, password: e.target.value })}
+                      placeholder={piholeSettings?.configured ? "leave blank to keep existing" : "enter password"}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => void savePihole()}
+                      disabled={piholeSaveStatus === "saving"}
+                      className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                    >
+                      {piholeSaveStatus === "saving" ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400">
+                      {piholeSettings?.enabled ? "Enabled" : "Disabled"}
+                    </span>
+                    <button
+                      role="switch"
+                      aria-checked={piholeSettings?.enabled ?? false}
+                      aria-label="Pi-hole integration"
+                      onClick={() => void togglePihole()}
+                      disabled={!piholeSettings?.configured}
+                      className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-40 disabled:cursor-not-allowed ${
+                        piholeSettings?.enabled && piholeSettings?.configured
+                          ? "bg-indigo-600"
+                          : "bg-slate-600"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
+                          piholeSettings?.enabled && piholeSettings?.configured
+                            ? "translate-x-4"
+                            : "translate-x-0.5"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {piholeSaveMessage && (
+                  <div
+                    className={`rounded px-3 py-2 text-xs ${
+                      piholeSaveStatus === "success"
+                        ? "bg-emerald-900/50 text-emerald-300 border border-emerald-700"
+                        : "bg-red-900/50 text-red-300 border border-red-700"
+                    }`}
+                  >
+                    {piholeSaveMessage}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </section>
 
