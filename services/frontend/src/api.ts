@@ -1,4 +1,4 @@
-import type { Alert, HaSettings, Incident, IncidentDetail, LlmSettings, RuleCategory, Stats } from "./types";
+import type { Alert, Digest, HaSettings, Incident, IncidentDetail, LlmSettings, RuleCategory, Stats } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -173,6 +173,41 @@ export async function fetchIncidents(params: { limit?: number; offset?: number }
 export async function fetchIncident(id: string): Promise<IncidentDetail> {
   const res = await authFetch(`/api/incidents/${id}`);
   return res.json() as Promise<IncidentDetail>;
+}
+
+// ── Digests API ───────────────────────────────────────────────────────────────
+
+export async function fetchDigests(params: { limit?: number; offset?: number } = {}): Promise<{
+  items: Digest[];
+  total: number;
+  limit: number;
+  offset: number;
+}> {
+  const qs = new URLSearchParams();
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  const res = await authFetch(`/api/digests?${qs}`);
+  return res.json();
+}
+
+export async function fetchDigest(id: string): Promise<Digest> {
+  const res = await authFetch(`/api/digests/${id}`);
+  return res.json() as Promise<Digest>;
+}
+
+export async function generateDigest(): Promise<Digest | null> {
+  const res = await fetch("/api/digests/generate", {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (res.status === 401) { clearToken(); window.location.reload(); throw new Error("Unauthorized"); }
+  if (res.status === 204) return null;
+  if (res.status === 422) {
+    const data = (await res.json()) as { detail: string };
+    throw new Error(data.detail ?? "LLM not configured");
+  }
+  if (!res.ok) throw new Error(`POST /api/digests/generate failed: ${res.status}`);
+  return res.json() as Promise<Digest>;
 }
 
 export function createAlertWebSocket(token: string): WebSocket {

@@ -8,16 +8,18 @@ import { AlertDrawer } from "./components/AlertDrawer";
 import { DashboardPage } from "./components/DashboardPage";
 import { ConfigPage } from "./components/ConfigPage";
 import { IncidentsPage } from "./components/IncidentsPage";
+import { DigestsPage } from "./components/DigestsPage";
 import { useAlerts } from "./hooks/useAlerts";
 import type { Alert, Severity } from "./types";
 
 type SeverityFilter = Severity | "all";
-type Page = "alerts" | "dashboard" | "incidents" | "config";
+type Page = "alerts" | "dashboard" | "incidents" | "digests" | "config";
 
 const TABS: { id: Page; label: string }[] = [
   { id: "alerts", label: "Alerts" },
   { id: "dashboard", label: "Dashboard" },
   { id: "incidents", label: "Incidents" },
+  { id: "digests", label: "Digests" },
   { id: "config", label: "Config" },
 ];
 
@@ -100,6 +102,8 @@ function AlertsPage({ onLogout }: { onLogout: () => void }) {
         <DashboardPage />
       ) : page === "incidents" ? (
         <IncidentsPage />
+      ) : page === "digests" ? (
+        <DigestsPage />
       ) : (
         <ConfigPage />
       )}

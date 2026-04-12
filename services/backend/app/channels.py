@@ -12,6 +12,12 @@ alerts:enriched  Published by the AI enricher (RAID-013) after per-alert
                  the original alert unchanged).  Payload: alert dict with an
                  additional "enrichment" key.  This is the channel the
                  notification router and the WebSocket broadcaster subscribe to.
+
+incidents:new    Published by the batch correlator (RAID-015) when a new
+                 incident record is created.  Payload: incident dict.
+
+digests:new      Published by the digestor (RAID-015a) when a new periodic
+                 security digest is created.  Payload: digest dict.
 """
 
 import os
@@ -24,8 +30,9 @@ from contextlib import asynccontextmanager
 ALERTS_RAW = "alerts:raw"
 ALERTS_ENRICHED = "alerts:enriched"
 INCIDENTS_NEW = "incidents:new"
+DIGESTS_NEW = "digests:new"
 
-ALL_CHANNELS = (ALERTS_RAW, ALERTS_ENRICHED, INCIDENTS_NEW)
+ALL_CHANNELS = (ALERTS_RAW, ALERTS_ENRICHED, INCIDENTS_NEW, DIGESTS_NEW)
 
 # ── Connection helpers ────────────────────────────────────────────────────────
 

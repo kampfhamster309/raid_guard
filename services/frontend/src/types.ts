@@ -76,3 +76,20 @@ export interface Incident {
 export interface IncidentDetail extends Incident {
   alerts: Alert[];
 }
+
+export interface Digest {
+  id: string;
+  created_at: string;
+  period_start: string;
+  period_end: string;
+  risk_level: string | null;
+  content: string; // JSON: {overall_risk, summary, notable_incidents, emerging_trends, recommended_actions}
+}
+
+export interface DigestContent {
+  overall_risk: string;
+  summary: string;
+  notable_incidents: string[];
+  emerging_trends: string[];
+  recommended_actions: string[];
+}
