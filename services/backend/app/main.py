@@ -10,10 +10,11 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from .auth import decode_token
 from .backends.homeassistant import HomeAssistantBackend
 from .channels import ALERTS_ENRICHED, get_redis_url
+from .correlator import run_correlator
 from .enricher import run_enricher
 from .ingestor import ingestor_loop
 from .notification_router import run_notification_router
-from .routers import alerts, auth, rules, settings, stats
+from .routers import alerts, auth, incidents, rules, settings, stats
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
 
     ingestor_task = asyncio.create_task(ingestor_loop(pool, redis_client))
     enrich_task = asyncio.create_task(run_enricher(redis_client, pool))
+    correlator_task = asyncio.create_task(run_correlator(redis_client, pool))
 
     backends = [b for b in [HomeAssistantBackend.from_env(pool)] if b is not None]
     notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
@@ -48,8 +50,11 @@ async def lifespan(app: FastAPI):
     finally:
         ingestor_task.cancel()
         enrich_task.cancel()
+        correlator_task.cancel()
         notif_task.cancel()
-        await asyncio.gather(ingestor_task, enrich_task, notif_task, return_exceptions=True)
+        await asyncio.gather(
+            ingestor_task, enrich_task, correlator_task, notif_task, return_exceptions=True
+        )
         await redis_client.aclose()
         await pool.close()
 
@@ -58,6 +63,7 @@ app = FastAPI(title="raid_guard backend", lifespan=lifespan)
 
 app.include_router(auth.router)
 app.include_router(alerts.router)
+app.include_router(incidents.router)
 app.include_router(stats.router)
 app.include_router(rules.router)
 app.include_router(settings.router)

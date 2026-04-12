@@ -1,9 +1,10 @@
 # raid_guard
 
 > **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
-> configuration, Home Assistant push notifications, and AI alert enrichment
-> are functional (RAID-001 through RAID-014). Active-response features are
-> still under development. See `development_plan.md` for the full roadmap.
+> configuration, Home Assistant push notifications, AI alert enrichment, and
+> AI batch incident correlation are functional (RAID-001 through RAID-015).
+> Active-response features are still under development. See
+> `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
 on-premises LLM. Traffic is captured from an AVM Fritzbox router, analysed
@@ -124,6 +125,8 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/alerts` | Paginated alert list — query params: `limit`, `offset`, `severity`, `src_ip`, `after`, `before` |
 | `GET` | `/api/alerts/{id}` | Single alert detail including raw EVE JSON |
 | `GET` | `/api/stats` | Last-24 h totals, hourly chart data, top source IPs, top signatures |
+| `GET` | `/api/incidents` | Paginated incident list — query params: `limit` (default 20), `offset` |
+| `GET` | `/api/incidents/{id}` | Single incident detail including the full list of related alerts |
 | `GET` | `/api/rules/categories` | List ET Open rule categories with enabled/disabled state |
 | `PUT` | `/api/rules/categories` | Update disabled categories (body: `{"disabled": ["emerging-p2p", ...]}`) |
 | `POST` | `/api/rules/reload` | Run `suricata-update` + SIGHUP inside the Suricata container |
@@ -150,8 +153,8 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, rule management, notification router (HA push) |
-| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, rule config, LLM + HA settings |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, rule management, notification router (HA push) |
+| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, rule config, LLM + HA settings |
 
 ---
 

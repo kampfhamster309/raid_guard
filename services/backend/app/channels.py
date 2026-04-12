@@ -23,8 +23,9 @@ from contextlib import asynccontextmanager
 
 ALERTS_RAW = "alerts:raw"
 ALERTS_ENRICHED = "alerts:enriched"
+INCIDENTS_NEW = "incidents:new"
 
-ALL_CHANNELS = (ALERTS_RAW, ALERTS_ENRICHED)
+ALL_CHANNELS = (ALERTS_RAW, ALERTS_ENRICHED, INCIDENTS_NEW)
 
 # ── Connection helpers ────────────────────────────────────────────────────────
 

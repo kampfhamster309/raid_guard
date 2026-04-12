@@ -49,10 +49,12 @@ def test_alerts_enriched_channel_name():
     assert ALERTS_ENRICHED == "alerts:enriched"
 
 
-def test_all_channels_contains_both():
+def test_all_channels_contains_expected():
+    from app.channels import INCIDENTS_NEW
     assert ALERTS_RAW in ALL_CHANNELS
     assert ALERTS_ENRICHED in ALL_CHANNELS
-    assert len(ALL_CHANNELS) == 2
+    assert INCIDENTS_NEW in ALL_CHANNELS
+    assert len(ALL_CHANNELS) == 3
 
 
 # ── Connection helper ─────────────────────────────────────────────────────────

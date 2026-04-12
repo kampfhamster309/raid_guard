@@ -59,3 +59,20 @@ export interface LlmSettings {
   timeout: number;
   max_tokens: number;
 }
+
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+
+export interface Incident {
+  id: string;
+  created_at: string;
+  period_start: string;
+  period_end: string;
+  alert_ids: string[];
+  narrative: string | null;
+  risk_level: RiskLevel;
+  name: string | null;
+}
+
+export interface IncidentDetail extends Incident {
+  alerts: Alert[];
+}

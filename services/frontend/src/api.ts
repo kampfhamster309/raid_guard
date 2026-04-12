@@ -1,4 +1,4 @@
-import type { Alert, HaSettings, LlmSettings, RuleCategory, Stats } from "./types";
+import type { Alert, HaSettings, Incident, IncidentDetail, LlmSettings, RuleCategory, Stats } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -153,6 +153,26 @@ export async function updateLlmSettings(settings: LlmSettings): Promise<LlmSetti
 export async function testLlm(): Promise<{ content: string }> {
   const res = await authFetch("/api/settings/llm/test", { method: "POST" });
   return res.json() as Promise<{ content: string }>;
+}
+
+// ── Incidents API ─────────────────────────────────────────────────────────────
+
+export async function fetchIncidents(params: { limit?: number; offset?: number } = {}): Promise<{
+  items: Incident[];
+  total: number;
+  limit: number;
+  offset: number;
+}> {
+  const qs = new URLSearchParams();
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  const res = await authFetch(`/api/incidents?${qs}`);
+  return res.json();
+}
+
+export async function fetchIncident(id: string): Promise<IncidentDetail> {
+  const res = await authFetch(`/api/incidents/${id}`);
+  return res.json() as Promise<IncidentDetail>;
 }
 
 export function createAlertWebSocket(token: string): WebSocket {
