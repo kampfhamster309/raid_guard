@@ -43,7 +43,7 @@ class PiholeSettingsRequest(BaseModel):
 
 class BlockedDomain(BaseModel):
     domain: str
-    comment: str
+    comment: str | None
     added_at: int | None  # Unix timestamp from Pi-hole
     enabled: bool
 

@@ -102,7 +102,7 @@ export interface PiholeSettings {
 
 export interface BlockedDomain {
   domain: string;
-  comment: string;
+  comment: string | null;
   added_at: number | null; // Unix timestamp from Pi-hole
   enabled: boolean;
 }
