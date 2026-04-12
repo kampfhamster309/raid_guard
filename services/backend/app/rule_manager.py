@@ -24,6 +24,11 @@ DISABLE_CONF_PATH = Path(
     os.environ.get("SURICATA_DISABLE_CONF", "/suricata/config/disable.conf")
 )
 
+# Path to the suppress.conf used by Suricata's threshold engine.
+SUPPRESS_CONF_PATH = Path(
+    os.environ.get("SURICATA_SUPPRESS_CONF", "/suricata/config/suppress.conf")
+)
+
 # Same volume but mounted at a different path inside the Suricata container.
 DISABLE_CONF_CONTAINER_PATH = os.environ.get(
     "SURICATA_DISABLE_CONF_CONTAINER", "/etc/suricata/custom/disable.conf"
@@ -288,3 +293,24 @@ def _reload_suricata_sync() -> str:
 async def reload_suricata() -> str:
     """Async wrapper — runs the synchronous Docker calls in a thread pool."""
     return await asyncio.to_thread(_reload_suricata_sync)
+
+
+# ── Suppression management ────────────────────────────────────────────────────
+
+
+def _append_suppression_sync(signature_id: int) -> None:
+    """Append a Suricata suppress directive to suppress.conf (synchronous)."""
+    SUPPRESS_CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
+    line = f"suppress gen_id 1, sig_id {signature_id}\n"
+    with open(SUPPRESS_CONF_PATH, "a") as f:
+        f.write(line)
+    logger.info("Appended suppression for sig_id=%d to %s", signature_id, SUPPRESS_CONF_PATH)
+
+
+async def apply_suppression(signature_id: int) -> None:
+    """Write a suppress directive and trigger a live Suricata rule reload.
+
+    Raises RuntimeError if the reload fails (same as ``reload_suricata``).
+    """
+    await asyncio.to_thread(_append_suppression_sync, signature_id)
+    await reload_suricata()

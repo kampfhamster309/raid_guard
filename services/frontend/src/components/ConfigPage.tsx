@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchHaSettings, fetchLlmSettings, testHaSend, testLlm, updateHaSettings, updateLlmSettings } from "../api";
 import { useRules } from "../hooks/useRules";
 import type { HaSettings, LlmSettings } from "../types";
+import { TuningSuggestionsSection } from "./TuningSuggestionsSection";
 
 type TestStatus = "idle" | "sending" | "success" | "error";
 
@@ -344,6 +345,9 @@ export function ConfigPage() {
             </div>
           </div>
         </section>
+
+        {/* ── Tuning Suggestions ─────────────────────────────────────────── */}
+        <TuningSuggestionsSection />
 
       </div>
     </div>

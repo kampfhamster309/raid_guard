@@ -1,0 +1,152 @@
+"""Tuning suggestions API — GET/POST /api/tuning/… (RAID-015b)."""
+
+from datetime import datetime, timezone
+from uuid import UUID
+
+import asyncpg
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+from pydantic import BaseModel
+
+from ..auth import require_auth
+from ..dependencies import get_pool
+from ..llm_config import get_llm_config
+from ..noisetuner import _row_to_dict, generate_tuning_suggestions
+from ..rule_manager import apply_suppression
+
+router = APIRouter(prefix="/api/tuning", tags=["tuning"])
+
+_COLS = (
+    "id, created_at, signature, signature_id, "
+    "hit_count, assessment, action, status, confirmed_at"
+)
+
+
+# ── Response models ───────────────────────────────────────────────────────────
+
+
+class TuningSuggestion(BaseModel):
+    id: UUID
+    created_at: datetime
+    signature: str
+    signature_id: int | None
+    hit_count: int
+    assessment: str
+    action: str
+    status: str
+    confirmed_at: datetime | None
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+
+@router.get("", response_model=list[TuningSuggestion])
+async def list_suggestions(
+    pool: asyncpg.Pool = Depends(get_pool),
+    _: str = Depends(require_auth),
+):
+    """Return all pending tuning suggestions, newest first."""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"SELECT {_COLS} FROM tuning_suggestions "
+            "WHERE status = 'pending' ORDER BY hit_count DESC, created_at DESC"
+        )
+    return [TuningSuggestion(**_row_to_dict(r)) for r in rows]
+
+
+@router.post("/{suggestion_id}/confirm", response_model=TuningSuggestion)
+async def confirm_suggestion(
+    suggestion_id: UUID,
+    pool: asyncpg.Pool = Depends(get_pool),
+    _: str = Depends(require_auth),
+):
+    """Confirm a tuning suggestion.
+
+    For ``suppress`` suggestions that have a ``signature_id``, a Suricata
+    suppress directive is written and a live rule reload is triggered.
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT {_COLS} FROM tuning_suggestions WHERE id = $1 LIMIT 1",
+            suggestion_id,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        if row["status"] != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Suggestion is already {row['status']}",
+            )
+
+        now = datetime.now(timezone.utc)
+        updated = await conn.fetchrow(
+            f"UPDATE tuning_suggestions SET status = 'confirmed', confirmed_at = $1 "
+            f"WHERE id = $2 RETURNING {_COLS}",
+            now,
+            suggestion_id,
+        )
+
+    # Apply suppression rule if action is suppress and we have a sig id
+    if row["action"] == "suppress" and row["signature_id"] is not None:
+        try:
+            await apply_suppression(row["signature_id"])
+        except RuntimeError as exc:
+            # Suppression file was written but Suricata reload failed — not fatal
+            # (the rule will be applied on the next manual reload).
+            import logging
+            logging.getLogger(__name__).warning(
+                "Tuning: suppression rule written but reload failed: %s", exc
+            )
+
+    return TuningSuggestion(**_row_to_dict(updated))
+
+
+@router.post("/{suggestion_id}/dismiss", response_model=TuningSuggestion)
+async def dismiss_suggestion(
+    suggestion_id: UUID,
+    pool: asyncpg.Pool = Depends(get_pool),
+    _: str = Depends(require_auth),
+):
+    """Dismiss a tuning suggestion without applying any change."""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT {_COLS} FROM tuning_suggestions WHERE id = $1 LIMIT 1",
+            suggestion_id,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        if row["status"] != "pending":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Suggestion is already {row['status']}",
+            )
+        updated = await conn.fetchrow(
+            f"UPDATE tuning_suggestions SET status = 'dismissed' "
+            f"WHERE id = $1 RETURNING {_COLS}",
+            suggestion_id,
+        )
+    return TuningSuggestion(**_row_to_dict(updated))
+
+
+@router.post("/run")
+async def run_tuner(
+    pool: asyncpg.Pool = Depends(get_pool),
+    _: str = Depends(require_auth),
+):
+    """Trigger an immediate tuning analysis.
+
+    Returns the list of new suggestions (200), an empty list if skipped
+    (not enough data or no new noisy signatures), or 422 if the LLM is
+    not configured.
+    """
+    cfg = await get_llm_config(pool)
+    if not cfg["url"] or not cfg["model"]:
+        raise HTTPException(
+            status_code=422,
+            detail="LM Studio URL and model must be configured before running the tuner.",
+        )
+
+    result = await generate_tuning_suggestions(pool)
+    if result is None:
+        return Response(status_code=204)
+    return result

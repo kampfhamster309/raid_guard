@@ -93,3 +93,18 @@ export interface DigestContent {
   emerging_trends: string[];
   recommended_actions: string[];
 }
+
+export type TuningAction = "suppress" | "threshold-adjust" | "keep";
+export type TuningStatus = "pending" | "confirmed" | "dismissed";
+
+export interface TuningSuggestion {
+  id: string;
+  created_at: string;
+  signature: string;
+  signature_id: number | null;
+  hit_count: number;
+  assessment: string;
+  action: TuningAction;
+  status: TuningStatus;
+  confirmed_at: string | null;
+}

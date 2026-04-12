@@ -14,8 +14,9 @@ from .correlator import run_correlator
 from .digestor import run_digestor
 from .enricher import run_enricher
 from .ingestor import ingestor_loop
+from .noisetuner import run_noisetuner
 from .notification_router import run_notification_router
-from .routers import alerts, auth, digests, incidents, rules, settings, stats
+from .routers import alerts, auth, digests, incidents, rules, settings, stats, tuning
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI):
     enrich_task = asyncio.create_task(run_enricher(redis_client, pool))
     correlator_task = asyncio.create_task(run_correlator(redis_client, pool))
     digestor_task = asyncio.create_task(run_digestor(redis_client, pool))
+    noisetuner_task = asyncio.create_task(run_noisetuner(pool))
 
     backends = [b for b in [HomeAssistantBackend.from_env(pool)] if b is not None]
     notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
@@ -54,9 +56,11 @@ async def lifespan(app: FastAPI):
         enrich_task.cancel()
         correlator_task.cancel()
         digestor_task.cancel()
+        noisetuner_task.cancel()
         notif_task.cancel()
         await asyncio.gather(
-            ingestor_task, enrich_task, correlator_task, digestor_task, notif_task,
+            ingestor_task, enrich_task, correlator_task, digestor_task,
+            noisetuner_task, notif_task,
             return_exceptions=True,
         )
         await redis_client.aclose()
@@ -72,6 +76,7 @@ app.include_router(digests.router)
 app.include_router(stats.router)
 app.include_router(rules.router)
 app.include_router(settings.router)
+app.include_router(tuning.router)
 
 
 @app.get("/health")

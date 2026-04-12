@@ -1,4 +1,4 @@
-import type { Alert, Digest, HaSettings, Incident, IncidentDetail, LlmSettings, RuleCategory, Stats } from "./types";
+import type { Alert, Digest, HaSettings, Incident, IncidentDetail, LlmSettings, RuleCategory, Stats, TuningSuggestion } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -208,6 +208,37 @@ export async function generateDigest(): Promise<Digest | null> {
   }
   if (!res.ok) throw new Error(`POST /api/digests/generate failed: ${res.status}`);
   return res.json() as Promise<Digest>;
+}
+
+// ── Tuning API ────────────────────────────────────────────────────────────────
+
+export async function fetchTuningSuggestions(): Promise<TuningSuggestion[]> {
+  const res = await authFetch("/api/tuning");
+  return res.json() as Promise<TuningSuggestion[]>;
+}
+
+export async function confirmSuggestion(id: string): Promise<TuningSuggestion> {
+  const res = await authFetch(`/api/tuning/${id}/confirm`, { method: "POST" });
+  return res.json() as Promise<TuningSuggestion>;
+}
+
+export async function dismissSuggestion(id: string): Promise<TuningSuggestion> {
+  const res = await authFetch(`/api/tuning/${id}/dismiss`, { method: "POST" });
+  return res.json() as Promise<TuningSuggestion>;
+}
+
+export async function runTuner(): Promise<TuningSuggestion[]> {
+  const res = await fetch("/api/tuning/run", {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (res.status === 401) { clearToken(); window.location.reload(); throw new Error("Unauthorized"); }
+  if (res.status === 422) {
+    const data = (await res.json()) as { detail: string };
+    throw new Error(data.detail ?? "LLM not configured");
+  }
+  if (!res.ok) throw new Error(`POST /api/tuning/run failed: ${res.status}`);
+  return res.json() as Promise<TuningSuggestion[]>;
 }
 
 export function createAlertWebSocket(token: string): WebSocket {

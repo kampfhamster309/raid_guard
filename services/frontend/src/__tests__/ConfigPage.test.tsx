@@ -26,6 +26,7 @@ beforeEach(() => {
   vi.mocked(api.fetchLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.updateLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.testLlm).mockResolvedValue({ content: '{"summary":"test","severity_reasoning":"ok","recommended_action":"nothing"}' });
+  vi.mocked(api.fetchTuningSuggestions).mockResolvedValue([]);
 });
 
 // ── Rule Categories ───────────────────────────────────────────────────────────

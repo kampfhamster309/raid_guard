@@ -2,9 +2,10 @@
 
 > **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
 > configuration, Home Assistant push notifications, AI alert enrichment,
-> AI batch incident correlation, and periodic security digests are functional
-> (RAID-001 through RAID-015a). Active-response features are still under
-> development. See `development_plan.md` for the full roadmap.
+> AI batch incident correlation, periodic security digests, and AI-driven noise
+> tuning suggestions are functional (RAID-001 through RAID-015b).
+> Active-response features are still under development. See
+> `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
 on-premises LLM. Traffic is captured from an AVM Fritzbox router, analysed
@@ -130,6 +131,10 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/digests` | Paginated digest list — query params: `limit` (default 10), `offset` |
 | `GET` | `/api/digests/{id}` | Single digest with full JSON content |
 | `POST` | `/api/digests/generate` | Trigger an immediate digest (200 with digest, 204 if too few alerts, 422 if LLM not configured) |
+| `GET` | `/api/tuning` | List pending tuning suggestions (ordered by hit count) |
+| `POST` | `/api/tuning/{id}/confirm` | Confirm suggestion (applies suppression rule if action=suppress + sig_id present) |
+| `POST` | `/api/tuning/{id}/dismiss` | Dismiss suggestion without applying any change |
+| `POST` | `/api/tuning/run` | Trigger immediate tuning analysis (200 with suggestions list, 422 if LLM not configured) |
 | `GET` | `/api/rules/categories` | List ET Open rule categories with enabled/disabled state |
 | `PUT` | `/api/rules/categories` | Update disabled categories (body: `{"disabled": ["emerging-p2p", ...]}`) |
 | `POST` | `/api/rules/reload` | Run `suricata-update` + SIGHUP inside the Suricata container |
@@ -156,8 +161,8 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, periodic digest worker, rule management, notification router (HA push) |
-| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, digests view, rule config, LLM + HA settings |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, periodic digest worker, noise tuner, rule management, notification router (HA push) |
+| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, digests view, rule config, LLM + HA settings, tuning suggestions |
 
 ---
 
