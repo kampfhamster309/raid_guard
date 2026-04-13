@@ -2,10 +2,10 @@
 
 > **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
 > configuration, Home Assistant push notifications, AI alert enrichment,
-> AI batch incident correlation, periodic security digests, and AI-driven noise
-> tuning suggestions are functional (RAID-001 through RAID-015b).
-> Active-response features are still under development. See
-> `development_plan.md` for the full roadmap.
+> AI batch incident correlation, periodic security digests, AI-driven noise
+> tuning, Pi-hole DNS sinkholing, and Fritzbox device quarantine are
+> functional (RAID-001 through RAID-018).
+> See `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
 on-premises LLM. Traffic is captured from an AVM Fritzbox router, analysed
@@ -32,8 +32,8 @@ Fritzbox → capture-agent → FIFO (/pcap/) → Suricata (IDS only)
 ```
 
 Inline IPS is permanently out of scope — traffic does not pass through the
-Unraid box. Active blocking is via Pi-hole v6 DNS sinkholing and a future
-Fritzbox TR-064 investigation.
+Unraid box. Active blocking uses two backends: Pi-hole v6 DNS sinkholing
+(domain-based) and Fritzbox TR-064 device quarantine (LAN device WAN cutoff).
 
 ---
 
@@ -146,6 +146,15 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/settings/llm` | Get LM Studio configuration (URL, model, timeout, max tokens) |
 | `PUT` | `/api/settings/llm` | Persist LM Studio configuration to the config table |
 | `POST` | `/api/settings/llm/test` | Send a synthetic alert to the LLM and return the raw response |
+| `GET` | `/api/pihole/settings` | Pi-hole connection settings (`{url, enabled, configured}` — password never returned) |
+| `PUT` | `/api/pihole/settings` | Update Pi-hole URL / enabled flag / password (blank password = keep existing) |
+| `GET` | `/api/pihole/blocklist` | List all exact deny-list domains from Pi-hole |
+| `POST` | `/api/pihole/block` | Add a domain to Pi-hole's deny list (body: `{"domain": "..."}`) |
+| `DELETE` | `/api/pihole/block/{domain}` | Remove a domain from Pi-hole's deny list |
+| `GET` | `/api/fritz/status` | Fritzbox connectivity check and HostFilter service availability |
+| `GET` | `/api/fritz/blocked` | List quarantined LAN devices (from DB) |
+| `POST` | `/api/fritz/block` | Quarantine a LAN device — cuts off all WAN access (body: `{"ip": "..."}`) |
+| `DELETE` | `/api/fritz/block/{ip}` | Lift quarantine for a device and restore WAN access |
 | `WS` | `/ws/alerts?token=<jwt>` | Live alert feed (subscribes to `alerts:enriched` Redis channel) |
 | `GET` | `/health` | Liveness check (no auth) |
 
@@ -160,9 +169,9 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `capture-agent` | ✅ | Authenticates with Fritzbox, streams libpcap via HTTP to a shared FIFO |
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
-| `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, periodic digest worker, noise tuner, rule management, notification router (HA push) |
-| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, digests view, rule config, LLM + HA settings, tuning suggestions |
+| `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`, `incidents:new`, `digests:new`) |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, periodic digest worker, noise tuner, rule management, notification router (HA push), Pi-hole sinkhole client, Fritzbox TR-064 quarantine |
+| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, digests view, unified blocklist (Pi-hole + Fritzbox), rule config, LLM + HA settings, tuning suggestions |
 
 ---
 
