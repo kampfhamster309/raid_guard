@@ -107,6 +107,22 @@ export interface BlockedDomain {
   enabled: boolean;
 }
 
+export interface FritzStatus {
+  configured: boolean;
+  connected: boolean;
+  host_filter_available: boolean;
+  model: string;
+  firmware: string;
+}
+
+export interface FritzBlockedDevice {
+  id: string;
+  blocked_at: string;
+  ip: string;
+  hostname: string | null;
+  comment: string | null;
+}
+
 export type TuningAction = "suppress" | "threshold-adjust" | "keep";
 export type TuningStatus = "pending" | "confirmed" | "dismissed";
 

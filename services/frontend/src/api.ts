@@ -1,4 +1,4 @@
-import type { Alert, BlockedDomain, Digest, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion } from "./types";
+import type { Alert, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -248,6 +248,31 @@ export async function blockDomain(domain: string, comment?: string): Promise<Blo
 
 export async function unblockDomain(domain: string): Promise<void> {
   await authFetch(`/api/pihole/block/${encodeURIComponent(domain)}`, { method: "DELETE" });
+}
+
+// ── Fritzbox quarantine API ───────────────────────────────────────────────────
+
+export async function fetchFritzStatus(): Promise<FritzStatus> {
+  const res = await authFetch("/api/fritz/status");
+  return res.json() as Promise<FritzStatus>;
+}
+
+export async function fetchFritzBlocked(): Promise<FritzBlockedDevice[]> {
+  const res = await authFetch("/api/fritz/blocked");
+  return res.json() as Promise<FritzBlockedDevice[]>;
+}
+
+export async function blockFritzDevice(ip: string, comment?: string): Promise<FritzBlockedDevice> {
+  const res = await authFetch("/api/fritz/block", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ip, comment: comment ?? "" }),
+  });
+  return res.json() as Promise<FritzBlockedDevice>;
+}
+
+export async function unblockFritzDevice(ip: string): Promise<void> {
+  await authFetch(`/api/fritz/block/${encodeURIComponent(ip)}`, { method: "DELETE" });
 }
 
 // ── Tuning API ────────────────────────────────────────────────────────────────
