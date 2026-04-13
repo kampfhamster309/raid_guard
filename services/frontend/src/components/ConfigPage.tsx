@@ -1,10 +1,22 @@
 import { useEffect, useState } from "react";
-import { fetchHaSettings, fetchLlmSettings, fetchPiholeSettings, testHaSend, testLlm, updateHaSettings, updateLlmSettings, updatePiholeSettings } from "../api";
+import { deletePushSubscription, fetchHaSettings, fetchLlmSettings, fetchPiholeSettings, fetchVapidPublicKey, savePushSubscription, testHaSend, testLlm, updateHaSettings, updateLlmSettings, updatePiholeSettings } from "../api";
 import { useRules } from "../hooks/useRules";
 import type { HaSettings, LlmSettings, PiholeSettings } from "../types";
 import { TuningSuggestionsSection } from "./TuningSuggestionsSection";
 
 type TestStatus = "idle" | "sending" | "success" | "error";
+
+function _urlBase64ToUint8Array(base64String: string): ArrayBuffer {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const buffer = new ArrayBuffer(rawData.length);
+  const view = new Uint8Array(buffer);
+  for (let i = 0; i < rawData.length; i++) {
+    view[i] = rawData.charCodeAt(i);
+  }
+  return buffer;
+}
 
 export function ConfigPage() {
   const { categories, loading, error, reloadStatus, reloadMessage, toggleCategory, reload } =
@@ -119,6 +131,71 @@ export function ConfigPage() {
       .catch(() => {})
       .finally(() => setHaLoading(false));
   }, []);
+
+  // ── Web Push subscription ──────────────────────────────────────────────────
+  const [pushSupported] = useState(
+    () => "serviceWorker" in navigator && "PushManager" in window
+  );
+  const [pushPermission, setPushPermission] = useState<NotificationPermission | "unsupported">(
+    () => (!("Notification" in window) ? "unsupported" : Notification.permission)
+  );
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushStatus, setPushStatus] = useState<"idle" | "working" | "success" | "error">("idle");
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!pushSupported) return;
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => setPushSubscribed(sub !== null))
+      .catch(() => {});
+  }, [pushSupported]);
+
+  const subscribePush = async () => {
+    setPushStatus("working");
+    setPushMessage(null);
+    try {
+      const permission = await Notification.requestPermission();
+      setPushPermission(permission);
+      if (permission !== "granted") {
+        setPushStatus("error");
+        setPushMessage("Notification permission denied.");
+        return;
+      }
+      const vapidKey = await fetchVapidPublicKey();
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: _urlBase64ToUint8Array(vapidKey),
+      });
+      await savePushSubscription(sub);
+      setPushSubscribed(true);
+      setPushStatus("success");
+      setPushMessage("Push notifications enabled.");
+    } catch (e) {
+      setPushStatus("error");
+      setPushMessage(e instanceof Error ? e.message : "Failed to subscribe.");
+    }
+  };
+
+  const unsubscribePush = async () => {
+    setPushStatus("working");
+    setPushMessage(null);
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await deletePushSubscription(sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setPushSubscribed(false);
+      setPushStatus("success");
+      setPushMessage("Push notifications disabled.");
+    } catch (e) {
+      setPushStatus("error");
+      setPushMessage(e instanceof Error ? e.message : "Failed to unsubscribe.");
+    }
+  };
 
   const toggleHa = async () => {
     if (!haSettings) return;
@@ -389,6 +466,53 @@ export function ConfigPage() {
                   }`}
                 >
                   {testMessage}
+                </div>
+              )}
+            </div>
+
+            {/* Web Push row */}
+            <div className="px-4 py-4">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 pr-4">
+                  <p className="text-sm font-medium text-slate-200">Web Push</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {!pushSupported
+                      ? "Not supported in this browser."
+                      : pushPermission === "denied"
+                      ? "Permission denied — unblock notifications in browser settings."
+                      : pushSubscribed
+                      ? "Subscribed — alerts will be pushed to this browser."
+                      : "Subscribe to receive alerts as push notifications in this browser."}
+                  </p>
+                </div>
+                {pushSupported && pushPermission !== "denied" && (
+                  <button
+                    onClick={() => void (pushSubscribed ? unsubscribePush() : subscribePush())}
+                    disabled={pushStatus === "working"}
+                    aria-label={pushSubscribed ? "Unsubscribe from push notifications" : "Subscribe to push notifications"}
+                    className={`px-3 py-1.5 rounded text-xs font-medium transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+                      pushSubscribed
+                        ? "bg-slate-700 hover:bg-slate-600 text-slate-200"
+                        : "bg-indigo-600 hover:bg-indigo-500 text-white"
+                    }`}
+                  >
+                    {pushStatus === "working"
+                      ? "Working…"
+                      : pushSubscribed
+                      ? "Unsubscribe"
+                      : "Subscribe"}
+                  </button>
+                )}
+              </div>
+              {pushMessage && (
+                <div
+                  className={`mt-3 rounded px-3 py-2 text-xs ${
+                    pushStatus === "success"
+                      ? "bg-emerald-900/50 text-emerald-300 border border-emerald-700"
+                      : "bg-red-900/50 text-red-300 border border-red-700"
+                  }`}
+                >
+                  {pushMessage}
                 </div>
               )}
             </div>

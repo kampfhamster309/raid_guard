@@ -3,8 +3,8 @@
 > **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
 > configuration, Home Assistant push notifications, AI alert enrichment,
 > AI batch incident correlation, periodic security digests, AI-driven noise
-> tuning, Pi-hole DNS sinkholing, and Fritzbox device quarantine are
-> functional (RAID-001 through RAID-018).
+> tuning, Pi-hole DNS sinkholing, Fritzbox device quarantine, and PWA with
+> Web Push notifications are functional (RAID-001 through RAID-019).
 > See `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
@@ -155,6 +155,9 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/fritz/blocked` | List quarantined LAN devices (from DB) |
 | `POST` | `/api/fritz/block` | Quarantine a LAN device — cuts off all WAN access (body: `{"ip": "..."}`) |
 | `DELETE` | `/api/fritz/block/{ip}` | Lift quarantine for a device and restore WAN access |
+| `GET` | `/api/push/vapid-public-key` | Return VAPID public key for browser push subscription |
+| `POST` | `/api/push/subscribe` | Save a browser push subscription (body: `{"endpoint": "...", "keys": {"p256dh": "...", "auth": "..."}}`) |
+| `DELETE` | `/api/push/subscribe` | Remove a push subscription (body: `{"endpoint": "..."}`) |
 | `WS` | `/ws/alerts?token=<jwt>` | Live alert feed (subscribes to `alerts:enriched` Redis channel) |
 | `GET` | `/health` | Liveness check (no auth) |
 
@@ -170,8 +173,8 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`, `incidents:new`, `digests:new`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, periodic digest worker, noise tuner, rule management, notification router (HA push), Pi-hole sinkhole client, Fritzbox TR-064 quarantine |
-| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, digests view, unified blocklist (Pi-hole + Fritzbox), rule config, LLM + HA settings, tuning suggestions |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, periodic digest worker, noise tuner, rule management, notification router (HA push + Web Push), Pi-hole sinkhole client, Fritzbox TR-064 quarantine |
+| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, digests view, unified blocklist (Pi-hole + Fritzbox), rule config, LLM + HA + Web Push settings, tuning suggestions |
 
 ---
 
@@ -219,8 +222,11 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `LM_ENRICHMENT_TIMEOUT` | `90` | LLM request timeout in seconds |
 | `LM_MAX_TOKENS` | `512` | Maximum tokens in the LLM response |
 | `PIHOLE_HOST` / `PIHOLE_PASSWORD` | — | Pi-hole v6 address and API password |
-| `HA_WEBHOOK_URL` | — | Home Assistant webhook URL (leave unset to disable push notifications) |
-| `DASHBOARD_URL` | — | Public URL of the raid_guard dashboard — used to generate deep links in HA notifications (e.g. `http://unraid:3000`) |
+| `HA_WEBHOOK_URL` | — | Home Assistant webhook URL (leave unset to disable HA push) |
+| `DASHBOARD_URL` | — | Public URL of the raid_guard dashboard — used to generate deep links in push notifications (e.g. `http://unraid:3000`) |
+| `VAPID_PRIVATE_KEY` | — | VAPID private key (base64url) — generate with `py_vapid` (see `.env.example`) |
+| `VAPID_PUBLIC_KEY` | — | VAPID public key (base64url) — served to browsers for push subscription |
+| `VAPID_SUBJECT` | `mailto:admin@example.com` | VAPID subject — `mailto:` or `https:` URI identifying the push service contact |
 
 ---
 

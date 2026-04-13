@@ -8,3 +8,4 @@ docker==7.1.0
 httpx==0.28.1
 openai==2.31.0
 fritzconnection==1.15.1
+pywebpush==2.0.0

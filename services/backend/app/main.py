@@ -9,6 +9,7 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 
 from .auth import decode_token
 from .backends.homeassistant import HomeAssistantBackend
+from .backends.webpush import WebPushBackend
 from .channels import ALERTS_ENRICHED, get_redis_url
 from .correlator import run_correlator
 from .digestor import run_digestor
@@ -16,7 +17,7 @@ from .enricher import run_enricher
 from .ingestor import ingestor_loop
 from .noisetuner import run_noisetuner
 from .notification_router import run_notification_router
-from .routers import alerts, auth, digests, fritz, incidents, pihole, rules, settings, stats, tuning
+from .routers import alerts, auth, digests, fritz, incidents, pihole, push, rules, settings, stats, tuning
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,13 @@ async def lifespan(app: FastAPI):
     digestor_task = asyncio.create_task(run_digestor(redis_client, pool))
     noisetuner_task = asyncio.create_task(run_noisetuner(pool))
 
-    backends = [b for b in [HomeAssistantBackend.from_env(pool)] if b is not None]
+    backends = [
+        b for b in [
+            HomeAssistantBackend.from_env(pool),
+            WebPushBackend.from_env(pool),
+        ]
+        if b is not None
+    ]
     notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
 
     try:
@@ -79,6 +86,7 @@ app.include_router(settings.router)
 app.include_router(tuning.router)
 app.include_router(pihole.router)
 app.include_router(fritz.router)
+app.include_router(push.router)
 
 
 @app.get("/health")

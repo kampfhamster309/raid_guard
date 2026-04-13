@@ -306,6 +306,34 @@ export async function runTuner(): Promise<TuningSuggestion[]> {
   return res.json() as Promise<TuningSuggestion[]>;
 }
 
+// ── Web Push API ──────────────────────────────────────────────────────────────
+
+export async function fetchVapidPublicKey(): Promise<string> {
+  const res = await authFetch("/api/push/vapid-public-key");
+  const data = (await res.json()) as { public_key: string };
+  return data.public_key;
+}
+
+export async function savePushSubscription(subscription: PushSubscription): Promise<void> {
+  const json = subscription.toJSON();
+  await authFetch("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      endpoint: json.endpoint,
+      keys: json.keys ?? {},
+    }),
+  });
+}
+
+export async function deletePushSubscription(endpoint: string): Promise<void> {
+  await authFetch("/api/push/subscribe", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
 export function createAlertWebSocket(token: string): WebSocket {
   const proto = window.location.protocol === "https:" ? "wss" : "ws";
   const host = window.location.host;
