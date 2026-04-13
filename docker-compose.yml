@@ -85,6 +85,9 @@ services:
       SURICATA_DISABLE_CONF_CONTAINER: /etc/suricata/custom/disable.conf
       HA_WEBHOOK_URL: ${HA_WEBHOOK_URL:-}
       DASHBOARD_URL: ${DASHBOARD_URL:-}
+      FRITZ_HOST: ${FRITZ_HOST:-192.168.178.1}
+      FRITZ_USER: ${FRITZ_USER:-}
+      FRITZ_PASSWORD: ${FRITZ_PASSWORD:-}
     volumes:
       - suricata_logs:/var/log/suricata:ro
       - suricata_config:/suricata/config

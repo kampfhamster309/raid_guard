@@ -16,7 +16,7 @@ from .enricher import run_enricher
 from .ingestor import ingestor_loop
 from .noisetuner import run_noisetuner
 from .notification_router import run_notification_router
-from .routers import alerts, auth, digests, incidents, pihole, rules, settings, stats, tuning
+from .routers import alerts, auth, digests, fritz, incidents, pihole, rules, settings, stats, tuning
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ app.include_router(rules.router)
 app.include_router(settings.router)
 app.include_router(tuning.router)
 app.include_router(pihole.router)
+app.include_router(fritz.router)
 
 
 @app.get("/health")
