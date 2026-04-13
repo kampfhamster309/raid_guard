@@ -2,6 +2,9 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { vi, describe, it, expect, beforeEach } from "vitest";
 import { BlocklistPage } from "../components/BlocklistPage";
 import * as api from "../api";
+import type { User } from "../types";
+
+const ADMIN_USER: User = { username: "admin", role: "admin", created_at: "2026-01-01T00:00:00" };
 
 vi.mock("../api");
 
@@ -52,19 +55,19 @@ beforeEach(() => {
 describe("BlocklistPage — DNS Sinkhole — not configured", () => {
   it("shows not-configured message when Pi-hole is not configured", async () => {
     vi.mocked(api.fetchPiholeSettings).mockResolvedValue(PIHOLE_NOT_CONFIGURED);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/not configured or disabled/i);
   });
 
   it("shows not-configured message when Pi-hole is disabled", async () => {
     vi.mocked(api.fetchPiholeSettings).mockResolvedValue(PIHOLE_DISABLED);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/not configured or disabled/i);
   });
 
   it("does not load blocklist when Pi-hole not configured", async () => {
     vi.mocked(api.fetchPiholeSettings).mockResolvedValue(PIHOLE_NOT_CONFIGURED);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/not configured or disabled/i);
     expect(api.fetchBlocklist).not.toHaveBeenCalled();
   });
@@ -74,20 +77,20 @@ describe("BlocklistPage — DNS Sinkhole — not configured", () => {
 
 describe("BlocklistPage — DNS Sinkhole — blocklist", () => {
   it("renders blocked domain names", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("malware.example.com");
     expect(screen.getByText("tracker.evil.org")).toBeInTheDocument();
   });
 
   it("shows empty state when no domains blocked", async () => {
     vi.mocked(api.fetchBlocklist).mockResolvedValue([]);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/no domains blocked yet/i);
   });
 
   it("shows error when blocklist fetch fails", async () => {
     vi.mocked(api.fetchBlocklist).mockRejectedValue(new Error("Connection refused"));
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("Connection refused");
   });
 });
@@ -96,13 +99,13 @@ describe("BlocklistPage — DNS Sinkhole — blocklist", () => {
 
 describe("BlocklistPage — DNS Sinkhole — manual block", () => {
   it("renders domain block input", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("malware.example.com");
     expect(screen.getByRole("textbox", { name: /domain to block/i })).toBeInTheDocument();
   });
 
   it("calls blockDomain and refreshes list on submit", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("malware.example.com");
 
     const input = screen.getByRole("textbox", { name: /domain to block/i });
@@ -115,7 +118,7 @@ describe("BlocklistPage — DNS Sinkhole — manual block", () => {
 
   it("shows error when domain block fails", async () => {
     vi.mocked(api.blockDomain).mockRejectedValue(new Error("Pi-hole unreachable"));
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("malware.example.com");
 
     fireEvent.change(screen.getByRole("textbox", { name: /domain to block/i }), { target: { value: "evil.com" } });
@@ -125,7 +128,7 @@ describe("BlocklistPage — DNS Sinkhole — manual block", () => {
   });
 
   it("domain Block button is disabled when input is empty", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("malware.example.com");
     expect(screen.getByRole("button", { name: /^block$/i })).toBeDisabled();
   });
@@ -135,13 +138,13 @@ describe("BlocklistPage — DNS Sinkhole — manual block", () => {
 
 describe("BlocklistPage — DNS Sinkhole — unblock", () => {
   it("renders Unblock buttons for each domain", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("malware.example.com");
     expect(screen.getAllByRole("button", { name: /^unblock /i }).length).toBeGreaterThanOrEqual(2);
   });
 
   it("removes domain from list after unblock", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("malware.example.com");
     fireEvent.click(screen.getByRole("button", { name: /unblock malware.example.com/i }));
     await waitFor(() => expect(screen.queryByText("malware.example.com")).not.toBeInTheDocument());
@@ -154,25 +157,25 @@ describe("BlocklistPage — DNS Sinkhole — unblock", () => {
 describe("BlocklistPage — Device Quarantine — not configured", () => {
   it("shows not-configured message when Fritzbox not configured", async () => {
     vi.mocked(api.fetchFritzStatus).mockResolvedValue(FRITZ_NOT_CONFIGURED);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/fritzbox is not configured/i);
   });
 
   it("shows unreachable message when Fritzbox is configured but offline", async () => {
     vi.mocked(api.fetchFritzStatus).mockResolvedValue(FRITZ_UNREACHABLE);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/cannot reach fritzbox/i);
   });
 
   it("shows service-unavailable message when HostFilter not supported", async () => {
     vi.mocked(api.fetchFritzStatus).mockResolvedValue(FRITZ_NO_HOSTFILTER);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/x_avm-de_hostfilter service is not available/i);
   });
 
   it("does not load device list when Fritzbox not configured", async () => {
     vi.mocked(api.fetchFritzStatus).mockResolvedValue(FRITZ_NOT_CONFIGURED);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/fritzbox is not configured/i);
     expect(api.fetchFritzBlocked).not.toHaveBeenCalled();
   });
@@ -182,30 +185,30 @@ describe("BlocklistPage — Device Quarantine — not configured", () => {
 
 describe("BlocklistPage — Device Quarantine — list", () => {
   it("renders quarantined device IPs", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("192.168.178.50");
     expect(screen.getByText("192.168.178.77")).toBeInTheDocument();
   });
 
   it("shows hostname when available, dash when null", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("evil-iot");
   });
 
   it("shows empty state when no devices quarantined", async () => {
     vi.mocked(api.fetchFritzBlocked).mockResolvedValue([]);
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/no devices quarantined/i);
   });
 
   it("shows model name in section subtitle", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText(/FRITZ!Box 6660 Cable/);
   });
 
   it("shows error when device list fetch fails", async () => {
     vi.mocked(api.fetchFritzBlocked).mockRejectedValue(new Error("Fritzbox timeout"));
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("Fritzbox timeout");
   });
 });
@@ -214,13 +217,13 @@ describe("BlocklistPage — Device Quarantine — list", () => {
 
 describe("BlocklistPage — Device Quarantine — quarantine", () => {
   it("renders IP quarantine input", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("192.168.178.50");
     expect(screen.getByRole("textbox", { name: /ip to quarantine/i })).toBeInTheDocument();
   });
 
   it("calls blockFritzDevice on submit", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("192.168.178.50");
 
     fireEvent.change(screen.getByRole("textbox", { name: /ip to quarantine/i }), { target: { value: "192.168.178.99" } });
@@ -231,7 +234,7 @@ describe("BlocklistPage — Device Quarantine — quarantine", () => {
 
   it("shows error when quarantine fails", async () => {
     vi.mocked(api.blockFritzDevice).mockRejectedValue(new Error("Not in host table"));
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("192.168.178.50");
 
     fireEvent.change(screen.getByRole("textbox", { name: /ip to quarantine/i }), { target: { value: "192.168.178.99" } });
@@ -241,7 +244,7 @@ describe("BlocklistPage — Device Quarantine — quarantine", () => {
   });
 
   it("Quarantine button is disabled when input is empty", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("192.168.178.50");
     expect(screen.getByRole("button", { name: /^quarantine$/i })).toBeDisabled();
   });
@@ -251,13 +254,13 @@ describe("BlocklistPage — Device Quarantine — quarantine", () => {
 
 describe("BlocklistPage — Device Quarantine — unquarantine", () => {
   it("renders Unquarantine buttons for each device", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("192.168.178.50");
     expect(screen.getAllByRole("button", { name: /^unquarantine /i }).length).toBe(2);
   });
 
   it("removes device from list after unquarantine", async () => {
-    render(<BlocklistPage />);
+    render(<BlocklistPage currentUser={ADMIN_USER} />);
     await screen.findByText("192.168.178.50");
     fireEvent.click(screen.getByRole("button", { name: /unquarantine 192.168.178.50/i }));
     await waitFor(() => expect(screen.queryByText("192.168.178.50")).not.toBeInTheDocument());

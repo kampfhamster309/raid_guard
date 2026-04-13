@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from ..auth import require_auth
+from ..auth import require_admin, require_auth
 from ..dependencies import get_pool
 from ..fritz_blocker import FritzBlockerError, FritzNotInHostTableError, get_fritz_blocker
 
@@ -111,7 +111,7 @@ async def list_blocked(
 async def block_device(
     body: BlockRequest,
     pool=Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Quarantine a LAN device: block all its WAN access via Fritzbox TR-064."""
     ip = body.ip.strip()
@@ -148,7 +148,7 @@ async def block_device(
 async def unblock_device(
     ip: str,
     pool=Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Lift quarantine for a device: restore WAN access via Fritzbox TR-064."""
     blocker = _require_blocker()

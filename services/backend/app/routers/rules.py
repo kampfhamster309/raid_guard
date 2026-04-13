@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 import asyncpg
 
-from ..auth import require_auth
+from ..auth import require_admin, require_auth
 from ..dependencies import get_pool
 from ..rule_manager import (
     ET_OPEN_CATEGORIES,
@@ -69,7 +69,7 @@ async def list_categories(
 @router.put("/categories", response_model=CategoryListResponse)
 async def update_categories(
     body: UpdateCategoriesRequest,
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
     pool: asyncpg.Pool = Depends(get_pool),
 ):
     """Persist the set of disabled rule categories to the DB and update disable.conf.
@@ -86,7 +86,7 @@ async def update_categories(
 
 @router.post("/reload", response_model=ReloadResponse)
 async def trigger_reload(
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Run suricata-update in the Suricata container and send SIGHUP to reload rules.
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from ..auth import require_auth
+from ..auth import require_admin, require_auth
 from ..dependencies import get_pool
 from ..llm_config import get_llm_config
 from ..noisetuner import _row_to_dict, generate_tuning_suggestions
@@ -58,7 +58,7 @@ async def list_suggestions(
 async def confirm_suggestion(
     suggestion_id: UUID,
     pool: asyncpg.Pool = Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Confirm a tuning suggestion.
 
@@ -105,7 +105,7 @@ async def confirm_suggestion(
 async def dismiss_suggestion(
     suggestion_id: UUID,
     pool: asyncpg.Pool = Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Dismiss a tuning suggestion without applying any change."""
     async with pool.acquire() as conn:
@@ -131,7 +131,7 @@ async def dismiss_suggestion(
 @router.post("/run")
 async def run_tuner(
     pool: asyncpg.Pool = Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Trigger an immediate tuning analysis.
 

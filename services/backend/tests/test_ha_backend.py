@@ -197,9 +197,10 @@ async def test_get_ha_settings_default_enabled(monkeypatch):
     monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
     pool, _ = _make_pool(fetchrow_return=None)
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/settings/ha")
@@ -216,9 +217,10 @@ async def test_get_ha_settings_not_configured(monkeypatch):
     monkeypatch.delenv("HA_WEBHOOK_URL", raising=False)
     pool, _ = _make_pool(fetchrow_return=None)
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/settings/ha")
@@ -235,9 +237,10 @@ async def test_put_ha_settings_persists_disabled(monkeypatch):
     monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
     pool, conn = _make_pool()
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.put("/api/settings/ha", json={"enabled": False})
@@ -260,9 +263,10 @@ async def test_ha_test_sends_notification(monkeypatch):
     monkeypatch.delenv("DASHBOARD_URL", raising=False)
     pool, _ = _make_pool()
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     mock_client = _mock_post_ok()
     with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
@@ -280,9 +284,10 @@ async def test_ha_test_returns_422_when_not_configured(monkeypatch):
     monkeypatch.delenv("HA_WEBHOOK_URL", raising=False)
     pool, _ = _make_pool()
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.post("/api/settings/ha/test")
@@ -296,9 +301,10 @@ async def test_ha_test_returns_502_on_delivery_failure(monkeypatch):
     monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
     pool, _ = _make_pool()
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)

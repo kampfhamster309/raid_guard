@@ -122,9 +122,10 @@ async def test_set_disabled_categories_writes_disable_conf(tmp_path):
 async def test_list_categories_returns_all_categories():
     pool, _ = _make_pool(fetchrow_return=None)
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/rules/categories")
@@ -138,9 +139,10 @@ async def test_list_categories_returns_all_categories():
 async def test_list_categories_marks_disabled_correctly():
     pool, _ = _make_pool(fetchrow_return={"value": '["emerging-p2p"]'})
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/api/rules/categories")
@@ -158,9 +160,10 @@ async def test_list_categories_marks_disabled_correctly():
 async def test_update_categories_persists_and_returns(tmp_path):
     pool, _ = _make_pool()
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     with patch("app.rule_manager.DISABLE_CONF_PATH", tmp_path / "disable.conf"):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -181,9 +184,10 @@ async def test_update_categories_persists_and_returns(tmp_path):
 async def test_update_categories_rejects_unknown_id():
     pool, _ = _make_pool()
     from app.dependencies import get_pool
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.put(
@@ -200,8 +204,9 @@ async def test_update_categories_rejects_unknown_id():
 
 @pytest.mark.asyncio
 async def test_reload_returns_200_on_success():
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     with patch("app.rule_manager._reload_suricata_sync", return_value="Rules updated."):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -214,8 +219,9 @@ async def test_reload_returns_200_on_success():
 
 @pytest.mark.asyncio
 async def test_reload_returns_502_on_docker_error():
-    from app.auth import require_auth
+    from app.auth import require_admin, require_auth
     app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
 
     with patch(
         "app.rule_manager._reload_suricata_sync",

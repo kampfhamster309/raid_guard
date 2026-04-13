@@ -1,5 +1,13 @@
 export type Severity = "info" | "warning" | "critical";
 
+export type Role = "admin" | "viewer";
+
+export interface User {
+  username: string;
+  role: Role;
+  created_at: string;
+}
+
 export interface AlertEnrichment {
   summary: string;
   severity_reasoning: string;

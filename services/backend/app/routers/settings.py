@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from ..auth import require_auth
+from ..auth import require_admin, require_auth
 from ..backends.homeassistant import HomeAssistantBackend
 from ..dependencies import get_pool
 from ..enricher import _ENRICHMENT_RESPONSE_FORMAT, _SYSTEM_PROMPT, _build_user_prompt
@@ -58,7 +58,7 @@ async def get_push_threshold(
 async def set_push_threshold(
     body: ThresholdRequest,
     pool=Depends(get_pool),
-    _=Depends(require_auth),
+    _=Depends(require_admin),
 ):
     """Persist the alert severity push threshold (info | warning | critical)."""
     if body.threshold not in _VALID_THRESHOLDS:
@@ -112,7 +112,7 @@ async def get_ha_settings(
 async def set_ha_settings(
     body: HaSettingsRequest,
     pool=Depends(get_pool),
-    _=Depends(require_auth),
+    _=Depends(require_admin),
 ):
     """Enable or disable HA push notifications at runtime."""
     async with pool.acquire() as conn:
@@ -128,7 +128,7 @@ async def set_ha_settings(
 @router.post("/ha/test", status_code=200)
 async def test_ha_send(
     pool=Depends(get_pool),
-    _=Depends(require_auth),
+    _=Depends(require_admin),
 ):
     """Send a synthetic test notification to the configured HA webhook."""
     url = os.environ.get("HA_WEBHOOK_URL", "").strip()
@@ -198,7 +198,7 @@ async def get_llm_settings(
 async def set_llm_settings(
     body: LlmSettingsRequest,
     pool=Depends(get_pool),
-    _=Depends(require_auth),
+    _=Depends(require_admin),
 ):
     """Persist LLM configuration to the config table."""
     if not 1 <= body.timeout <= 600:
@@ -234,7 +234,7 @@ class LlmTestResponse(BaseModel):
 @router.post("/llm/test", response_model=LlmTestResponse)
 async def test_llm(
     pool=Depends(get_pool),
-    _=Depends(require_auth),
+    _=Depends(require_admin),
 ):
     """Send a synthetic alert to the LLM and return the raw response content.
 

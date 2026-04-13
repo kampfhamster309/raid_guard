@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from ..auth import require_auth
+from ..auth import require_admin, require_auth
 from ..dependencies import get_pool
 from ..pihole import (
     PiholeError,
@@ -81,7 +81,7 @@ async def get_settings(
 async def update_settings(
     body: PiholeSettingsRequest,
     pool=Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Persist Pi-hole connection settings.
 
@@ -139,7 +139,7 @@ async def get_blocklist(
 async def add_block(
     body: BlockRequest,
     pool=Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Add a domain to Pi-hole's exact deny list."""
     domain = body.domain.strip().lower()
@@ -164,7 +164,7 @@ async def add_block(
 async def remove_block(
     domain: str,
     pool=Depends(get_pool),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Remove a domain from Pi-hole's exact deny list."""
     cfg = await get_pihole_config(pool)

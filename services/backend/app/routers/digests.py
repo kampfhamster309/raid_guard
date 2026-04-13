@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from ..auth import require_auth
+from ..auth import require_admin, require_auth
 from ..dependencies import get_pool, get_redis
 from ..digestor import generate_digest
 from ..llm_config import get_llm_config
@@ -101,7 +101,7 @@ async def get_digest(
 async def generate_digest_now(
     pool: asyncpg.Pool = Depends(get_pool),
     redis_client: aioredis.Redis = Depends(get_redis),
-    _: str = Depends(require_auth),
+    _: str = Depends(require_admin),
 ):
     """Trigger an immediate digest generation.
 

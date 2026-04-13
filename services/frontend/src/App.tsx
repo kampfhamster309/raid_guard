@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { clearToken, fetchAlert, getToken } from "./api";
+import { clearToken, fetchAlert, fetchCurrentUser, getToken } from "./api";
 import { LoginPage } from "./components/LoginPage";
 import { Header } from "./components/Header";
 import { FilterBar } from "./components/FilterBar";
@@ -11,7 +11,7 @@ import { IncidentsPage } from "./components/IncidentsPage";
 import { DigestsPage } from "./components/DigestsPage";
 import { BlocklistPage } from "./components/BlocklistPage";
 import { useAlerts } from "./hooks/useAlerts";
-import type { Alert, Severity } from "./types";
+import type { Alert, Severity, User } from "./types";
 
 type SeverityFilter = Severity | "all";
 type Page = "alerts" | "dashboard" | "incidents" | "digests" | "blocklist" | "config";
@@ -46,7 +46,13 @@ function NavTabs({ page, onChange }: { page: Page; onChange: (p: Page) => void }
   );
 }
 
-function AlertsPage({ onLogout }: { onLogout: () => void }) {
+function AlertsPage({
+  currentUser,
+  onLogout,
+}: {
+  currentUser: User;
+  onLogout: () => void;
+}) {
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [searchText, setSearchText] = useState("");
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
@@ -69,7 +75,12 @@ function AlertsPage({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="h-screen flex flex-col bg-slate-900 text-slate-100">
-      <Header wsStatus={wsStatus} onRefresh={refresh} onLogout={onLogout} />
+      <Header
+        wsStatus={wsStatus}
+        onRefresh={refresh}
+        onLogout={onLogout}
+        currentUser={currentUser}
+      />
       <NavTabs page={page} onChange={setPage} />
 
       {page === "alerts" ? (
@@ -107,9 +118,9 @@ function AlertsPage({ onLogout }: { onLogout: () => void }) {
       ) : page === "digests" ? (
         <DigestsPage />
       ) : page === "blocklist" ? (
-        <BlocklistPage />
+        <BlocklistPage currentUser={currentUser} />
       ) : (
-        <ConfigPage />
+        <ConfigPage currentUser={currentUser} />
       )}
     </div>
   );
@@ -117,9 +128,22 @@ function AlertsPage({ onLogout }: { onLogout: () => void }) {
 
 export default function App() {
   const [authed, setAuthed] = useState(() => getToken() !== null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    if (!authed) return;
+    fetchCurrentUser()
+      .then(setCurrentUser)
+      .catch(() => {
+        // Token expired or user deleted — force re-login.
+        clearToken();
+        setAuthed(false);
+      });
+  }, [authed]);
 
   const handleLogout = () => {
     clearToken();
+    setCurrentUser(null);
     setAuthed(false);
   };
 
@@ -127,5 +151,13 @@ export default function App() {
     return <LoginPage onLogin={() => setAuthed(true)} />;
   }
 
-  return <AlertsPage onLogout={handleLogout} />;
+  if (!currentUser) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-900 text-slate-400 text-sm">
+        Loading…
+      </div>
+    );
+  }
+
+  return <AlertsPage currentUser={currentUser} onLogout={handleLogout} />;
 }

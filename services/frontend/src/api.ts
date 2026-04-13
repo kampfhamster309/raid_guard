@@ -1,4 +1,4 @@
-import type { Alert, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion } from "./types";
+import type { Alert, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion, User } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -331,6 +331,49 @@ export async function deletePushSubscription(endpoint: string): Promise<void> {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ endpoint }),
+  });
+}
+
+// ── Users API ─────────────────────────────────────────────────────────────────
+
+export async function fetchCurrentUser(): Promise<User> {
+  const res = await authFetch("/api/users/me");
+  return res.json() as Promise<User>;
+}
+
+export async function fetchUsers(): Promise<User[]> {
+  const res = await authFetch("/api/users");
+  return res.json() as Promise<User[]>;
+}
+
+export interface CreateUserParams {
+  username: string;
+  password: string;
+  role: "admin" | "viewer";
+}
+
+export async function createUser(params: CreateUserParams): Promise<User> {
+  const res = await authFetch("/api/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  return res.json() as Promise<User>;
+}
+
+export async function deleteUser(username: string): Promise<void> {
+  await authFetch(`/api/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+}
+
+export async function changePassword(
+  username: string,
+  currentPassword: string,
+  newPassword: string
+): Promise<void> {
+  await authFetch(`/api/users/${encodeURIComponent(username)}/password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
 }
 

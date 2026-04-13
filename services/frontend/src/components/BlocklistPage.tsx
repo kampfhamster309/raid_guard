@@ -4,7 +4,7 @@ import {
   fetchBlocklist, fetchFritzBlocked, fetchFritzStatus, fetchPiholeSettings,
   unblockDomain, unblockFritzDevice,
 } from "../api";
-import type { BlockedDomain, FritzBlockedDevice, FritzStatus, PiholeSettings } from "../types";
+import type { BlockedDomain, FritzBlockedDevice, FritzStatus, PiholeSettings, User } from "../types";
 
 function fmtDate(ts: number | string | null): string {
   if (ts == null) return "—";
@@ -14,7 +14,7 @@ function fmtDate(ts: number | string | null): string {
 
 // ── DNS Sinkhole (Pi-hole) section ────────────────────────────────────────────
 
-function PiholeSection() {
+function PiholeSection({ isAdmin }: { isAdmin: boolean }) {
   const [settings, setSettings] = useState<PiholeSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [domains, setDomains] = useState<BlockedDomain[]>([]);
@@ -106,28 +106,30 @@ function PiholeSection() {
 
       {active && (
         <>
-          <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/20">
-            <p className="text-xs text-slate-400 mb-2">Block a domain manually:</p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
-                placeholder="malware.example.com"
-                aria-label="Domain to block"
-                className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <button
-                onClick={() => void handleAdd()}
-                disabled={adding || !input.trim()}
-                className="px-4 py-1.5 text-xs font-medium rounded bg-red-700 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
-              >
-                {adding ? "Blocking…" : "Block"}
-              </button>
+          {isAdmin && (
+            <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/20">
+              <p className="text-xs text-slate-400 mb-2">Block a domain manually:</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
+                  placeholder="malware.example.com"
+                  aria-label="Domain to block"
+                  className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button
+                  onClick={() => void handleAdd()}
+                  disabled={adding || !input.trim()}
+                  className="px-4 py-1.5 text-xs font-medium rounded bg-red-700 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                >
+                  {adding ? "Blocking…" : "Block"}
+                </button>
+              </div>
+              {addError && <p className="text-xs text-red-400 mt-1">{addError}</p>}
             </div>
-            {addError && <p className="text-xs text-red-400 mt-1">{addError}</p>}
-          </div>
+          )}
 
           {listError && (
             <div className="px-4 py-2 bg-red-900/30 border-b border-red-700/50 text-red-300 text-xs">
@@ -146,7 +148,7 @@ function PiholeSection() {
                   <th className="px-4 py-2 text-left font-medium">Domain</th>
                   <th className="px-4 py-2 text-left font-medium hidden md:table-cell">Comment</th>
                   <th className="px-4 py-2 text-left font-medium hidden lg:table-cell">Added</th>
-                  <th className="px-4 py-2 text-right font-medium">Action</th>
+                  {isAdmin && <th className="px-4 py-2 text-right font-medium">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/50">
@@ -155,16 +157,18 @@ function PiholeSection() {
                     <td className="px-4 py-3 text-slate-200 font-mono text-xs">{d.domain}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs hidden md:table-cell">{d.comment ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs hidden lg:table-cell">{fmtDate(d.added_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => void handleRemove(d.domain)}
-                        disabled={removingId === d.domain}
-                        aria-label={`Unblock ${d.domain}`}
-                        className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition-colors text-slate-300"
-                      >
-                        {removingId === d.domain ? "Removing…" : "Unblock"}
-                      </button>
-                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => void handleRemove(d.domain)}
+                          disabled={removingId === d.domain}
+                          aria-label={`Unblock ${d.domain}`}
+                          className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition-colors text-slate-300"
+                        >
+                          {removingId === d.domain ? "Removing…" : "Unblock"}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -178,7 +182,7 @@ function PiholeSection() {
 
 // ── Device Quarantine (Fritzbox) section ──────────────────────────────────────
 
-function FritzSection() {
+function FritzSection({ isAdmin }: { isAdmin: boolean }) {
   const [status, setStatus] = useState<FritzStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [devices, setDevices] = useState<FritzBlockedDevice[]>([]);
@@ -285,30 +289,32 @@ function FritzSection() {
 
       {active && (
         <>
-          <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/20">
-            <p className="text-xs text-slate-400 mb-2">
-              Quarantine a device by LAN IP — blocks all internet access for that device:
-            </p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
-                placeholder="192.168.178.x"
-                aria-label="IP to quarantine"
-                className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <button
-                onClick={() => void handleAdd()}
-                disabled={adding || !input.trim()}
-                className="px-4 py-1.5 text-xs font-medium rounded bg-red-700 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
-              >
-                {adding ? "Blocking…" : "Quarantine"}
-              </button>
+          {isAdmin && (
+            <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/20">
+              <p className="text-xs text-slate-400 mb-2">
+                Quarantine a device by LAN IP — blocks all internet access for that device:
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void handleAdd(); }}
+                  placeholder="192.168.178.x"
+                  aria-label="IP to quarantine"
+                  className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <button
+                  onClick={() => void handleAdd()}
+                  disabled={adding || !input.trim()}
+                  className="px-4 py-1.5 text-xs font-medium rounded bg-red-700 hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                >
+                  {adding ? "Blocking…" : "Quarantine"}
+                </button>
+              </div>
+              {addError && <p className="text-xs text-red-400 mt-1">{addError}</p>}
             </div>
-            {addError && <p className="text-xs text-red-400 mt-1">{addError}</p>}
-          </div>
+          )}
 
           {listError && (
             <div className="px-4 py-2 bg-red-900/30 border-b border-red-700/50 text-red-300 text-xs">
@@ -328,7 +334,7 @@ function FritzSection() {
                   <th className="px-4 py-2 text-left font-medium hidden md:table-cell">Hostname</th>
                   <th className="px-4 py-2 text-left font-medium hidden md:table-cell">Comment</th>
                   <th className="px-4 py-2 text-left font-medium hidden lg:table-cell">Blocked at</th>
-                  <th className="px-4 py-2 text-right font-medium">Action</th>
+                  {isAdmin && <th className="px-4 py-2 text-right font-medium">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700/50">
@@ -338,16 +344,18 @@ function FritzSection() {
                     <td className="px-4 py-3 text-slate-400 text-xs hidden md:table-cell">{d.hostname ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs hidden md:table-cell">{d.comment ?? "—"}</td>
                     <td className="px-4 py-3 text-slate-400 text-xs hidden lg:table-cell">{fmtDate(d.blocked_at)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => void handleRemove(d.ip)}
-                        disabled={removingIp === d.ip}
-                        aria-label={`Unquarantine ${d.ip}`}
-                        className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition-colors text-slate-300"
-                      >
-                        {removingIp === d.ip ? "Removing…" : "Unquarantine"}
-                      </button>
-                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => void handleRemove(d.ip)}
+                          disabled={removingIp === d.ip}
+                          aria-label={`Unquarantine ${d.ip}`}
+                          className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-40 transition-colors text-slate-300"
+                        >
+                          {removingIp === d.ip ? "Removing…" : "Unquarantine"}
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -361,7 +369,8 @@ function FritzSection() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export function BlocklistPage() {
+export function BlocklistPage({ currentUser }: { currentUser: User }) {
+  const isAdmin = currentUser.role === "admin";
   return (
     <div className="flex-1 overflow-y-auto">
       <div className="px-4 py-3 border-b border-slate-700">
@@ -370,9 +379,9 @@ export function BlocklistPage() {
           Active blocks across all enforcement backends
         </p>
       </div>
-      <PiholeSection />
+      <PiholeSection isAdmin={isAdmin} />
       <div className="border-t-2 border-slate-700" />
-      <FritzSection />
+      <FritzSection isAdmin={isAdmin} />
     </div>
   );
 }

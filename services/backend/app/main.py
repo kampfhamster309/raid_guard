@@ -7,7 +7,7 @@ import asyncpg
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 
-from .auth import decode_token
+from .auth import ADMIN_PASSWORD, ADMIN_USERNAME, decode_token, hash_password
 from .backends.homeassistant import HomeAssistantBackend
 from .backends.webpush import WebPushBackend
 from .channels import ALERTS_ENRICHED, get_redis_url
@@ -17,7 +17,7 @@ from .enricher import run_enricher
 from .ingestor import ingestor_loop
 from .noisetuner import run_noisetuner
 from .notification_router import run_notification_router
-from .routers import alerts, auth, digests, fritz, incidents, pihole, push, rules, settings, stats, tuning
+from .routers import alerts, auth, digests, fritz, incidents, pihole, push, rules, settings, stats, tuning, users
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +31,25 @@ def _get_db_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{name}"
 
 
+async def _seed_admin(pool) -> None:
+    """If no users exist and ADMIN_PASSWORD env var is set, create the admin user."""
+    if not ADMIN_PASSWORD:
+        return
+    try:
+        async with pool.acquire() as conn:
+            count = await conn.fetchval("SELECT COUNT(*) FROM users")
+            if count == 0:
+                hashed = hash_password(ADMIN_PASSWORD)
+                await conn.execute(
+                    "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin')",
+                    ADMIN_USERNAME,
+                    hashed,
+                )
+                logger.info("Seeded admin user '%s' from environment variables.", ADMIN_USERNAME)
+    except Exception as exc:
+        logger.warning("Could not seed admin user: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # min_size=0 → no connections attempted at startup; pool creation always
@@ -40,6 +59,8 @@ async def lifespan(app: FastAPI):
 
     app.state.db_pool = pool
     app.state.redis = redis_client
+
+    await _seed_admin(pool)
 
     ingestor_task = asyncio.create_task(ingestor_loop(pool, redis_client))
     enrich_task = asyncio.create_task(run_enricher(redis_client, pool))
@@ -87,6 +108,7 @@ app.include_router(tuning.router)
 app.include_router(pihole.router)
 app.include_router(fritz.router)
 app.include_router(push.router)
+app.include_router(users.router)
 
 
 @app.get("/health")

@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import ADMIN_PASSWORD, ADMIN_USERNAME, create_token, require_auth
+from app.auth import ADMIN_PASSWORD, ADMIN_USERNAME, create_token, require_admin, require_auth
 from app.dependencies import get_pool, get_redis
 from app.main import app
 
@@ -65,6 +65,10 @@ def override_require_auth():
     return ADMIN_USERNAME or "admin"
 
 
+def override_require_admin():
+    return ADMIN_USERNAME or "admin"
+
+
 # ── Clients ───────────────────────────────────────────────────────────────────
 
 
@@ -80,6 +84,7 @@ def authed_client(mock_pool_conn):
     pool, conn = mock_pool_conn
     app.dependency_overrides[get_pool] = lambda: pool
     app.dependency_overrides[require_auth] = override_require_auth
+    app.dependency_overrides[require_admin] = override_require_admin
     with TestClient(app) as c:
         yield c, conn
     app.dependency_overrides.clear()

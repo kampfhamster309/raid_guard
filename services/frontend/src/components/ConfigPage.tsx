@@ -1,7 +1,23 @@
 import { useEffect, useState } from "react";
-import { deletePushSubscription, fetchHaSettings, fetchLlmSettings, fetchPiholeSettings, fetchVapidPublicKey, savePushSubscription, testHaSend, testLlm, updateHaSettings, updateLlmSettings, updatePiholeSettings } from "../api";
+import {
+  changePassword,
+  createUser,
+  deletePushSubscription,
+  deleteUser,
+  fetchHaSettings,
+  fetchLlmSettings,
+  fetchPiholeSettings,
+  fetchUsers,
+  fetchVapidPublicKey,
+  savePushSubscription,
+  testHaSend,
+  testLlm,
+  updateHaSettings,
+  updateLlmSettings,
+  updatePiholeSettings,
+} from "../api";
 import { useRules } from "../hooks/useRules";
-import type { HaSettings, LlmSettings, PiholeSettings } from "../types";
+import type { HaSettings, LlmSettings, PiholeSettings, User } from "../types";
 import { TuningSuggestionsSection } from "./TuningSuggestionsSection";
 
 type TestStatus = "idle" | "sending" | "success" | "error";
@@ -18,7 +34,255 @@ function _urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   return buffer;
 }
 
-export function ConfigPage() {
+// ── User Management section (admin only) ──────────────────────────────────────
+
+function UserManagementSection({ currentUser }: { currentUser: User }) {
+  const [users, setUsers] = useState<User[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState<"admin" | "viewer">("viewer");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [deletingUser, setDeletingUser] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchUsers()
+      .then(setUsers)
+      .catch((e) => setLoadError(e instanceof Error ? e.message : "Failed to load users"));
+  }, []);
+
+  const handleCreate = async () => {
+    const username = newUsername.trim();
+    if (!username || newPassword.length < 8) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const user = await createUser({ username, password: newPassword, role: newRole });
+      setUsers((prev) => [...prev, user]);
+      setNewUsername("");
+      setNewPassword("");
+      setNewRole("viewer");
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleDelete = async (username: string) => {
+    setDeletingUser(username);
+    try {
+      await deleteUser(username);
+      setUsers((prev) => prev.filter((u) => u.username !== username));
+    } catch {
+      // leave list unchanged
+    } finally {
+      setDeletingUser(null);
+    }
+  };
+
+  return (
+    <section>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-slate-100">User Management</h2>
+        <p className="text-sm text-slate-400 mt-0.5">
+          Manage dashboard users. Admins have full access; viewers are read-only.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-slate-700 p-4 space-y-4">
+        {loadError && (
+          <p className="text-red-400 text-sm">{loadError}</p>
+        )}
+
+        {/* User list */}
+        {users.length > 0 && (
+          <div className="divide-y divide-slate-700/50">
+            {users.map((u) => (
+              <div key={u.username} className="flex items-center justify-between py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-200">{u.username}</span>
+                  <span
+                    className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                      u.role === "admin"
+                        ? "bg-indigo-700 text-indigo-100"
+                        : "bg-slate-700 text-slate-300"
+                    }`}
+                  >
+                    {u.role}
+                  </span>
+                  {u.username === currentUser.username && (
+                    <span className="text-[10px] text-slate-500">(you)</span>
+                  )}
+                </div>
+                {u.username !== currentUser.username && (
+                  <button
+                    onClick={() => void handleDelete(u.username)}
+                    disabled={deletingUser === u.username}
+                    className="px-2 py-1 text-xs rounded bg-slate-700 hover:bg-red-700 disabled:opacity-40 transition-colors text-slate-300"
+                  >
+                    {deletingUser === u.username ? "Deleting…" : "Delete"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Create user form */}
+        <div className="pt-2 border-t border-slate-700">
+          <p className="text-xs text-slate-400 mb-3">Add a new user:</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <input
+              type="text"
+              value={newUsername}
+              onChange={(e) => setNewUsername(e.target.value)}
+              placeholder="Username"
+              aria-label="New username"
+              className="bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Password (min 8 chars)"
+              aria-label="New user password"
+              className="bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            <div className="flex gap-2">
+              <select
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as "admin" | "viewer")}
+                aria-label="New user role"
+                className="flex-1 bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="viewer">viewer</option>
+                <option value="admin">admin</option>
+              </select>
+              <button
+                onClick={() => void handleCreate()}
+                disabled={creating || !newUsername.trim() || newPassword.length < 8}
+                className="px-3 py-2 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white whitespace-nowrap"
+              >
+                {creating ? "Creating…" : "Add"}
+              </button>
+            </div>
+          </div>
+          {createError && (
+            <p className="text-xs text-red-400 mt-2">{createError}</p>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Change Password section (all users) ───────────────────────────────────────
+
+function ChangePasswordSection({ currentUser }: { currentUser: User }) {
+  const [currentPw, setCurrentPw] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    setMessage(null);
+    if (newPw !== confirmPw) {
+      setStatus("error");
+      setMessage("New passwords do not match.");
+      return;
+    }
+    if (newPw.length < 8) {
+      setStatus("error");
+      setMessage("Password must be at least 8 characters.");
+      return;
+    }
+    setStatus("saving");
+    try {
+      await changePassword(currentUser.username, currentPw, newPw);
+      setStatus("success");
+      setMessage("Password changed successfully.");
+      setCurrentPw("");
+      setNewPw("");
+      setConfirmPw("");
+    } catch (e) {
+      setStatus("error");
+      setMessage(e instanceof Error ? e.message : "Change failed");
+    }
+  };
+
+  return (
+    <section>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-slate-100">Change Password</h2>
+        <p className="text-sm text-slate-400 mt-0.5">
+          Update your own password.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-slate-700 p-4 space-y-3">
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Current password</label>
+          <input
+            type="password"
+            value={currentPw}
+            onChange={(e) => setCurrentPw(e.target.value)}
+            autoComplete="current-password"
+            className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">New password</label>
+          <input
+            type="password"
+            value={newPw}
+            onChange={(e) => setNewPw(e.target.value)}
+            autoComplete="new-password"
+            className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Confirm new password</label>
+          <input
+            type="password"
+            value={confirmPw}
+            onChange={(e) => setConfirmPw(e.target.value)}
+            autoComplete="new-password"
+            className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+        <div className="pt-1">
+          <button
+            onClick={() => void handleSave()}
+            disabled={status === "saving" || !currentPw || !newPw || !confirmPw}
+            className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+          >
+            {status === "saving" ? "Saving…" : "Change password"}
+          </button>
+        </div>
+        {message && (
+          <div
+            className={`rounded px-3 py-2 text-xs ${
+              status === "success"
+                ? "bg-emerald-900/50 text-emerald-300 border border-emerald-700"
+                : "bg-red-900/50 text-red-300 border border-red-700"
+            }`}
+          >
+            {message}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ── Main ConfigPage ───────────────────────────────────────────────────────────
+
+export function ConfigPage({ currentUser }: { currentUser: User }) {
+  const isAdmin = currentUser.role === "admin";
+
   const { categories, loading, error, reloadStatus, reloadMessage, toggleCategory, reload } =
     useRules();
 
@@ -58,7 +322,6 @@ export function ConfigPage() {
     try {
       const { content } = await testLlm();
       setLlmTestStatus("success");
-      // Pretty-print if valid JSON, otherwise show raw
       try {
         setLlmTestContent(JSON.stringify(JSON.parse(content), null, 2));
       } catch {
@@ -233,13 +496,15 @@ export function ConfigPage() {
                 Toggle ET Open rule categories. Click <span className="font-medium text-slate-300">Reload Suricata</span> to apply changes to the running engine.
               </p>
             </div>
-            <button
-              onClick={reload}
-              disabled={reloadStatus === "reloading"}
-              className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
-            >
-              {reloadStatus === "reloading" ? "Reloading…" : "Reload Suricata"}
-            </button>
+            {isAdmin && (
+              <button
+                onClick={reload}
+                disabled={reloadStatus === "reloading"}
+                className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+              >
+                {reloadStatus === "reloading" ? "Reloading…" : "Reload Suricata"}
+              </button>
+            )}
           </div>
 
           {reloadMessage && (
@@ -275,8 +540,9 @@ export function ConfigPage() {
                   <button
                     role="switch"
                     aria-checked={cat.enabled}
-                    onClick={() => void toggleCategory(cat.id)}
-                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                    onClick={isAdmin ? () => void toggleCategory(cat.id) : undefined}
+                    disabled={!isAdmin}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed ${
                       cat.enabled ? "bg-indigo-600" : "bg-slate-600"
                     }`}
                   >
@@ -314,7 +580,8 @@ export function ConfigPage() {
                       value={llmDraft.url}
                       onChange={(e) => setLlmDraft({ ...llmDraft, url: e.target.value })}
                       placeholder="http://192.168.1.x:1234/v1"
-                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={!isAdmin}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
                   </div>
                   <div className="sm:col-span-2">
@@ -324,7 +591,8 @@ export function ConfigPage() {
                       value={llmDraft.model}
                       onChange={(e) => setLlmDraft({ ...llmDraft, model: e.target.value })}
                       placeholder="gemma-4-27b"
-                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={!isAdmin}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
                   </div>
                   <div>
@@ -335,7 +603,8 @@ export function ConfigPage() {
                       max={600}
                       value={llmDraft.timeout}
                       onChange={(e) => setLlmDraft({ ...llmDraft, timeout: Number(e.target.value) })}
-                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={!isAdmin}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
                   </div>
                   <div>
@@ -346,19 +615,22 @@ export function ConfigPage() {
                       max={4096}
                       value={llmDraft.max_tokens}
                       onChange={(e) => setLlmDraft({ ...llmDraft, max_tokens: Number(e.target.value) })}
-                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={!isAdmin}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3 pt-1">
-                  <button
-                    onClick={() => void saveLlm()}
-                    disabled={llmSaveStatus === "saving"}
-                    className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
-                  >
-                    {llmSaveStatus === "saving" ? "Saving…" : "Save"}
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => void saveLlm()}
+                      disabled={llmSaveStatus === "saving"}
+                      className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                    >
+                      {llmSaveStatus === "saving" ? "Saving…" : "Save"}
+                    </button>
+                  )}
                   <button
                     onClick={() => void runLlmTest()}
                     disabled={llmTestStatus === "testing" || !llmSettings?.url || !llmSettings?.model}
@@ -425,7 +697,7 @@ export function ConfigPage() {
                   </p>
                 </div>
                 <div className="flex items-center gap-3 flex-shrink-0">
-                  {haSettings?.configured && (
+                  {isAdmin && haSettings?.configured && (
                     <button
                       onClick={() => void sendTest()}
                       disabled={testStatus === "sending" || !haSettings?.configured}
@@ -438,8 +710,8 @@ export function ConfigPage() {
                     role="switch"
                     aria-checked={haSettings?.enabled ?? false}
                     aria-label="Home Assistant notifications"
-                    onClick={() => void toggleHa()}
-                    disabled={haLoading || !haSettings?.configured}
+                    onClick={isAdmin ? () => void toggleHa() : undefined}
+                    disabled={haLoading || !haSettings?.configured || !isAdmin}
                     className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-40 disabled:cursor-not-allowed ${
                       haSettings?.enabled && haSettings?.configured
                         ? "bg-indigo-600"
@@ -542,7 +814,8 @@ export function ConfigPage() {
                       value={piholeDraft.url}
                       onChange={(e) => setPiholeDraft({ ...piholeDraft, url: e.target.value })}
                       placeholder="http://192.168.178.3"
-                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={!isAdmin}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
                   </div>
                   <div className="sm:col-span-2">
@@ -552,47 +825,50 @@ export function ConfigPage() {
                       value={piholeDraft.password}
                       onChange={(e) => setPiholeDraft({ ...piholeDraft, password: e.target.value })}
                       placeholder={piholeSettings?.configured ? "leave blank to keep existing" : "enter password"}
-                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      disabled={!isAdmin}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => void savePihole()}
-                      disabled={piholeSaveStatus === "saving"}
-                      className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
-                    >
-                      {piholeSaveStatus === "saving" ? "Saving…" : "Save"}
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-400">
-                      {piholeSettings?.enabled ? "Enabled" : "Disabled"}
-                    </span>
-                    <button
-                      role="switch"
-                      aria-checked={piholeSettings?.enabled ?? false}
-                      aria-label="Pi-hole integration"
-                      onClick={() => void togglePihole()}
-                      disabled={!piholeSettings?.configured}
-                      className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-40 disabled:cursor-not-allowed ${
-                        piholeSettings?.enabled && piholeSettings?.configured
-                          ? "bg-indigo-600"
-                          : "bg-slate-600"
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
+                {isAdmin && (
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => void savePihole()}
+                        disabled={piholeSaveStatus === "saving"}
+                        className="px-4 py-2 rounded text-sm font-medium bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                      >
+                        {piholeSaveStatus === "saving" ? "Saving…" : "Save"}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">
+                        {piholeSettings?.enabled ? "Enabled" : "Disabled"}
+                      </span>
+                      <button
+                        role="switch"
+                        aria-checked={piholeSettings?.enabled ?? false}
+                        aria-label="Pi-hole integration"
+                        onClick={() => void togglePihole()}
+                        disabled={!piholeSettings?.configured}
+                        className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-40 disabled:cursor-not-allowed ${
                           piholeSettings?.enabled && piholeSettings?.configured
-                            ? "translate-x-4"
-                            : "translate-x-0.5"
+                            ? "bg-indigo-600"
+                            : "bg-slate-600"
                         }`}
-                      />
-                    </button>
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
+                            piholeSettings?.enabled && piholeSettings?.configured
+                              ? "translate-x-4"
+                              : "translate-x-0.5"
+                          }`}
+                        />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {piholeSaveMessage && (
                   <div
@@ -612,6 +888,12 @@ export function ConfigPage() {
 
         {/* ── Tuning Suggestions ─────────────────────────────────────────── */}
         <TuningSuggestionsSection />
+
+        {/* ── User Management (admin only) ───────────────────────────────── */}
+        {isAdmin && <UserManagementSection currentUser={currentUser} />}
+
+        {/* ── Change Password (all users) ────────────────────────────────── */}
+        <ChangePasswordSection currentUser={currentUser} />
 
       </div>
     </div>
