@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import type { Alert } from "../types";
+import type { Alert, AlertEnrichment } from "../types";
 import { SeverityBadge } from "./SeverityBadge";
-import { blockDomain, fetchPiholeSettings } from "../api";
+import { blockDomain, fetchLlmSettings, fetchPiholeSettings, reEnrichAlert } from "../api";
 
 interface Props {
   alert: Alert | null;
@@ -38,6 +38,11 @@ export function AlertDrawer({ alert, onClose }: Props) {
   const [blockStatus, setBlockStatus] = useState<"idle" | "success" | "error">("idle");
   const [blockMessage, setBlockMessage] = useState<string | null>(null);
 
+  const [llmConfigured, setLlmConfigured] = useState(false);
+  const [enrichmentJson, setEnrichmentJson] = useState<AlertEnrichment | null>(null);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!alert) return;
     const handler = (e: KeyboardEvent) => {
@@ -47,16 +52,22 @@ export function AlertDrawer({ alert, onClose }: Props) {
     return () => document.removeEventListener("keydown", handler);
   }, [alert, onClose]);
 
-  // Load Pi-hole config and pre-fill domain whenever a new alert is opened.
+  // Reset all transient state and reload settings whenever a new alert is opened.
   useEffect(() => {
     if (!alert) return;
     setBlockStatus("idle");
     setBlockMessage(null);
     setBlockInput(extractDomain(alert.raw_json));
+    setEnrichmentJson(alert.enrichment_json);
+    setEnrichError(null);
 
     fetchPiholeSettings()
       .then((s) => setPiholeConfigured(s.configured && s.enabled))
       .catch(() => setPiholeConfigured(false));
+
+    fetchLlmSettings()
+      .then((s) => setLlmConfigured(s.url.trim() !== "" && s.model.trim() !== ""))
+      .catch(() => setLlmConfigured(false));
   }, [alert]);
 
   const handleBlock = async () => {
@@ -74,6 +85,20 @@ export function AlertDrawer({ alert, onClose }: Props) {
       setBlockMessage(e instanceof Error ? e.message : "Block failed");
     } finally {
       setBlocking(false);
+    }
+  };
+
+  const handleReEnrich = async () => {
+    if (!alert) return;
+    setEnriching(true);
+    setEnrichError(null);
+    try {
+      const result = await reEnrichAlert(alert.id);
+      setEnrichmentJson(result);
+    } catch (e) {
+      setEnrichError(e instanceof Error ? e.message : "AI analysis failed");
+    } finally {
+      setEnriching(false);
     }
   };
 
@@ -126,7 +151,7 @@ export function AlertDrawer({ alert, onClose }: Props) {
             </div>
           </section>
 
-          {alert.enrichment_json && (
+          {enrichmentJson ? (
             <section>
               <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
                 AI Analysis
@@ -134,19 +159,41 @@ export function AlertDrawer({ alert, onClose }: Props) {
               <div className="bg-slate-800 rounded p-3 space-y-3">
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Summary</p>
-                  <p className="text-sm text-slate-200">{alert.enrichment_json.summary}</p>
+                  <p className="text-sm text-slate-200">{enrichmentJson.summary}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Severity reasoning</p>
-                  <p className="text-sm text-slate-300">{alert.enrichment_json.severity_reasoning}</p>
+                  <p className="text-sm text-slate-300">{enrichmentJson.severity_reasoning}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Recommended action</p>
-                  <p className="text-sm text-indigo-300">{alert.enrichment_json.recommended_action}</p>
+                  <p className="text-sm text-indigo-300">{enrichmentJson.recommended_action}</p>
                 </div>
               </div>
             </section>
-          )}
+          ) : llmConfigured ? (
+            <section>
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                AI Analysis
+              </h2>
+              <div className="bg-slate-800 rounded p-3 space-y-2">
+                <p className="text-xs text-slate-400">
+                  This alert was not enriched automatically. Request a one-off analysis now.
+                </p>
+                <button
+                  onClick={() => void handleReEnrich()}
+                  disabled={enriching}
+                  className="px-3 py-1.5 text-xs font-medium rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                  aria-label="Request AI analysis"
+                >
+                  {enriching ? "Analysing…" : "Request AI Analysis"}
+                </button>
+                {enrichError && (
+                  <p className="text-xs text-red-400">{enrichError}</p>
+                )}
+              </div>
+            </section>
+          ) : null}
 
           {/* Pi-hole block domain */}
           {piholeConfigured && (

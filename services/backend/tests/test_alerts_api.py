@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from ipaddress import IPv4Address
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -148,3 +148,69 @@ def test_get_alert_invalid_uuid(authed_client):
     client, conn = authed_client
     resp = client.get("/api/alerts/not-a-uuid")
     assert resp.status_code == 422
+
+
+# ── enrich_alert ──────────────────────────────────────────────────────────────
+
+_ENRICHMENT = {
+    "summary": "Port scan from internal host",
+    "severity_reasoning": "Warning is appropriate.",
+    "recommended_action": "Investigate the source device.",
+}
+
+_LLM_CFG = {"url": "http://lm-studio:1234/v1", "model": "gemma-4-27b", "timeout": "90", "max_tokens": "512"}
+
+
+def test_enrich_alert_returns_enrichment(authed_client):
+    client, conn = authed_client
+    record = _fake_alert_record()
+    conn.fetchrow = AsyncMock(return_value=record)
+    conn.execute = AsyncMock(return_value=None)
+
+    with (
+        patch("app.routers.alerts.get_llm_config", AsyncMock(return_value=_LLM_CFG)),
+        patch("app.routers.alerts.enrich_single_alert", AsyncMock(return_value=_ENRICHMENT)),
+    ):
+        resp = client.post(f"/api/alerts/{record['id']}/enrich")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["summary"] == _ENRICHMENT["summary"]
+    assert body["severity_reasoning"] == _ENRICHMENT["severity_reasoning"]
+    assert body["recommended_action"] == _ENRICHMENT["recommended_action"]
+
+
+def test_enrich_alert_llm_not_configured(authed_client):
+    client, conn = authed_client
+    cfg_no_llm = {"url": "", "model": "", "timeout": "90", "max_tokens": "512"}
+
+    with patch("app.routers.alerts.get_llm_config", AsyncMock(return_value=cfg_no_llm)):
+        resp = client.post(f"/api/alerts/{uuid.uuid4()}/enrich")
+
+    assert resp.status_code == 422
+    assert "LLM not configured" in resp.json()["detail"]
+
+
+def test_enrich_alert_not_found(authed_client):
+    client, conn = authed_client
+    conn.fetchrow = AsyncMock(return_value=None)
+
+    with patch("app.routers.alerts.get_llm_config", AsyncMock(return_value=_LLM_CFG)):
+        resp = client.post(f"/api/alerts/{uuid.uuid4()}/enrich")
+
+    assert resp.status_code == 404
+
+
+def test_enrich_alert_llm_failure(authed_client):
+    client, conn = authed_client
+    record = _fake_alert_record()
+    conn.fetchrow = AsyncMock(return_value=record)
+
+    with (
+        patch("app.routers.alerts.get_llm_config", AsyncMock(return_value=_LLM_CFG)),
+        patch("app.routers.alerts.enrich_single_alert", AsyncMock(return_value=None)),
+    ):
+        resp = client.post(f"/api/alerts/{record['id']}/enrich")
+
+    assert resp.status_code == 504
+    assert "timed out" in resp.json()["detail"]

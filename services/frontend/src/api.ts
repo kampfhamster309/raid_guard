@@ -1,4 +1,4 @@
-import type { Alert, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion, User } from "./types";
+import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion, User } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -70,6 +70,18 @@ export async function fetchAlert(id: string): Promise<Alert> {
   const res = await fetch(`/api/alerts/${id}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch alert ${id}: ${res.status}`);
   return res.json() as Promise<Alert>;
+}
+
+export async function reEnrichAlert(id: string): Promise<AlertEnrichment> {
+  const res = await fetch(`/api/alerts/${id}/enrich`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (res.status === 401) { clearToken(); window.location.reload(); throw new Error("Unauthorized"); }
+  if (res.status === 422) throw new Error("LLM not configured");
+  if (res.status === 504) throw new Error("LLM timed out — try again");
+  if (!res.ok) throw new Error(`Enrichment failed: ${res.status}`);
+  return res.json() as Promise<AlertEnrichment>;
 }
 
 export async function fetchStats(): Promise<Stats> {

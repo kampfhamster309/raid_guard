@@ -180,6 +180,21 @@ async def _enrich_one(
         logger.error("Failed to publish enriched alert %s: %s", alert.get("id"), exc)
 
 
+# ── One-shot enrichment (used by the manual re-enrich API endpoint) ───────────
+
+
+async def enrich_single_alert(
+    alert: dict,
+    url: str,
+    model: str,
+    timeout: float,
+    max_tokens: int = 512,
+) -> dict | None:
+    """Call LM Studio for a single alert and return the enrichment dict, or None on failure."""
+    client = AsyncOpenAI(base_url=url, api_key="lm-studio")
+    return await _call_llm(client, alert, model, timeout, max_tokens)
+
+
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 

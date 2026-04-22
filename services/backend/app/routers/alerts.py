@@ -8,6 +8,8 @@ from pydantic import BaseModel
 
 from ..auth import require_auth
 from ..dependencies import get_pool
+from ..enricher import enrich_single_alert
+from ..llm_config import get_llm_config
 
 router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
@@ -164,3 +166,51 @@ async def get_alert(
     if row is None:
         raise HTTPException(status_code=404, detail="Alert not found")
     return AlertDetail(**_row_to_detail(row))
+
+
+class EnrichmentResult(BaseModel):
+    summary: str
+    severity_reasoning: str
+    recommended_action: str
+
+
+@router.post("/{alert_id}/enrich", response_model=EnrichmentResult)
+async def enrich_alert(
+    alert_id: UUID,
+    pool: asyncpg.Pool = Depends(get_pool),
+    _: str = Depends(require_auth),
+):
+    cfg = await get_llm_config(pool)
+    if not cfg["url"] or not cfg["model"]:
+        raise HTTPException(status_code=422, detail="LLM not configured")
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT {_DETAIL_COLS} FROM alerts WHERE id = $1 "
+            "ORDER BY timestamp DESC LIMIT 1",
+            alert_id,
+        )
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    alert_dict = _row_to_detail(row)
+    enrichment = await enrich_single_alert(
+        alert_dict,
+        cfg["url"],
+        cfg["model"],
+        float(cfg["timeout"]),
+        int(cfg["max_tokens"]),
+    )
+
+    if enrichment is None:
+        raise HTTPException(status_code=504, detail="LLM enrichment failed or timed out")
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE alerts SET enrichment_json = $1::jsonb WHERE id = $2::uuid",
+            json.dumps(enrichment),
+            alert_id,
+        )
+
+    return EnrichmentResult(**enrichment)
