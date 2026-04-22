@@ -213,6 +213,10 @@ rule-files:
 classification-file: /etc/suricata/classification.config
 reference-config-file: /etc/suricata/reference.config
 
+# Suppress and threshold directives — written by raid_guard's rule manager.
+# The file is created on first suppress/threshold-adjust confirmation.
+threshold-file: /etc/suricata/custom/suppress.conf
+
 # ── Misc ──────────────────────────────────────────────────────────────────────
 
 host-mode: auto

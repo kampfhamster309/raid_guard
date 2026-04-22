@@ -15,6 +15,10 @@ const SUG_SUPPRESS = {
   action: "suppress" as const,
   status: "pending" as const,
   confirmed_at: null,
+  threshold_count: null,
+  threshold_seconds: null,
+  threshold_track: null,
+  threshold_type: null,
 };
 
 const SUG_THRESHOLD = {
@@ -27,6 +31,10 @@ const SUG_THRESHOLD = {
   action: "threshold-adjust" as const,
   status: "pending" as const,
   confirmed_at: null,
+  threshold_count: 5,
+  threshold_seconds: 60,
+  threshold_track: "by_src",
+  threshold_type: "limit",
 };
 
 const SUG_KEEP = {
@@ -39,6 +47,10 @@ const SUG_KEEP = {
   action: "keep" as const,
   status: "pending" as const,
   confirmed_at: null,
+  threshold_count: null,
+  threshold_seconds: null,
+  threshold_track: null,
+  threshold_type: null,
 };
 
 beforeEach(() => {
@@ -104,10 +116,18 @@ describe("TuningSuggestionsSection — confirm", () => {
     expect(screen.getByRole("button", { name: /apply suppression/i })).toBeInTheDocument();
   });
 
-  it("shows Acknowledge button for threshold-adjust suggestions", async () => {
+  it("shows Apply Threshold button for threshold-adjust suggestions", async () => {
     render(<TuningSuggestionsSection />);
-    await screen.findByText("ET SCAN Potential SSH Scan");
-    expect(screen.getByRole("button", { name: /acknowledge/i })).toBeInTheDocument();
+    await screen.findByText("ET INFO Session Traversal Utls");
+    expect(screen.getByRole("button", { name: /apply threshold/i })).toBeInTheDocument();
+  });
+
+  it("pre-fills threshold form with LLM-suggested values", async () => {
+    vi.mocked(api.fetchTuningSuggestions).mockResolvedValue([SUG_THRESHOLD]);
+    render(<TuningSuggestionsSection />);
+    await screen.findByText("ET INFO Session Traversal Utls");
+    expect(screen.getByLabelText(/threshold count/i)).toHaveValue(5);
+    expect(screen.getByLabelText(/threshold seconds/i)).toHaveValue(60);
   });
 
   it("does not show confirm button for keep suggestions", async () => {
@@ -115,10 +135,10 @@ describe("TuningSuggestionsSection — confirm", () => {
     render(<TuningSuggestionsSection />);
     await screen.findByText("ET MALWARE Cobalt Strike Beacon");
     expect(screen.queryByRole("button", { name: /apply suppression/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /acknowledge/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /apply threshold/i })).not.toBeInTheDocument();
   });
 
-  it("removes suggestion from list after confirm", async () => {
+  it("removes suggestion from list after confirm (suppress)", async () => {
     render(<TuningSuggestionsSection />);
     await screen.findByText("ET SCAN Potential SSH Scan");
 
@@ -127,7 +147,29 @@ describe("TuningSuggestionsSection — confirm", () => {
     await waitFor(() => {
       expect(screen.queryByText("ET SCAN Potential SSH Scan")).not.toBeInTheDocument();
     });
-    expect(api.confirmSuggestion).toHaveBeenCalledWith(SUG_SUPPRESS.id);
+    expect(api.confirmSuggestion).toHaveBeenCalledWith(SUG_SUPPRESS.id, undefined);
+  });
+
+  it("calls confirmSuggestion with threshold params when Apply Threshold is clicked", async () => {
+    vi.mocked(api.fetchTuningSuggestions).mockResolvedValue([SUG_THRESHOLD]);
+    vi.mocked(api.confirmSuggestion).mockResolvedValue({
+      ...SUG_THRESHOLD,
+      status: "confirmed",
+      confirmed_at: "2026-04-12T10:01:00+00:00",
+    });
+    render(<TuningSuggestionsSection />);
+    await screen.findByText("ET INFO Session Traversal Utls");
+
+    fireEvent.click(screen.getByRole("button", { name: /apply threshold/i }));
+
+    await waitFor(() => {
+      expect(api.confirmSuggestion).toHaveBeenCalledWith(SUG_THRESHOLD.id, {
+        threshold_count: 5,
+        threshold_seconds: 60,
+        threshold_track: "by_src",
+        threshold_type: "limit",
+      });
+    });
   });
 });
 

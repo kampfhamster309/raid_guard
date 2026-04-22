@@ -19,6 +19,10 @@ def _fake_suggestion_row(
     status="pending",
     signature_id=2001219,
     confirmed_at=None,
+    threshold_count=None,
+    threshold_seconds=None,
+    threshold_track=None,
+    threshold_type=None,
 ):
     return {
         "id": _SIG_ID,
@@ -30,6 +34,10 @@ def _fake_suggestion_row(
         "action": action,
         "status": status,
         "confirmed_at": confirmed_at,
+        "threshold_count": threshold_count,
+        "threshold_seconds": threshold_seconds,
+        "threshold_track": threshold_track,
+        "threshold_type": threshold_type,
     }
 
 
@@ -107,16 +115,67 @@ def test_confirm_suggestion_skips_apply_when_no_sig_id(authed_client):
     mock_apply.assert_not_awaited()
 
 
-def test_confirm_suggestion_skips_apply_for_non_suppress(authed_client):
+def test_confirm_suggestion_skips_apply_for_keep(authed_client):
     client, conn = authed_client
     row = _fake_suggestion_row(action="keep")
     confirmed = _fake_suggestion_row(status="confirmed", action="keep", confirmed_at=_NOW)
     conn.fetchrow = AsyncMock(side_effect=[row, confirmed])
 
-    with patch("app.routers.tuning.apply_suppression", new=AsyncMock()) as mock_apply:
-        client.post(f"/api/tuning/{_SIG_ID}/confirm")
+    with patch("app.routers.tuning.apply_suppression", new=AsyncMock()) as mock_suppress:
+        with patch("app.routers.tuning.apply_threshold", new=AsyncMock()) as mock_threshold:
+            client.post(f"/api/tuning/{_SIG_ID}/confirm")
 
-    mock_apply.assert_not_awaited()
+    mock_suppress.assert_not_awaited()
+    mock_threshold.assert_not_awaited()
+
+
+def test_confirm_threshold_adjust_calls_apply_threshold(authed_client):
+    client, conn = authed_client
+    row = _fake_suggestion_row(action="threshold-adjust", signature_id=2008581)
+    confirmed = _fake_suggestion_row(
+        status="confirmed", action="threshold-adjust", signature_id=2008581, confirmed_at=_NOW
+    )
+    conn.fetchrow = AsyncMock(side_effect=[row, confirmed])
+
+    with patch("app.routers.tuning.apply_threshold", new=AsyncMock()) as mock_threshold:
+        resp = client.post(
+            f"/api/tuning/{_SIG_ID}/confirm",
+            json={"threshold_count": 3, "threshold_seconds": 30,
+                  "threshold_track": "by_src", "threshold_type": "limit"},
+        )
+
+    assert resp.status_code == 200
+    mock_threshold.assert_awaited_once_with(2008581, 3, 30, "by_src", "limit")
+
+
+def test_confirm_threshold_adjust_uses_defaults_when_no_body(authed_client):
+    client, conn = authed_client
+    row = _fake_suggestion_row(action="threshold-adjust", signature_id=2008581)
+    confirmed = _fake_suggestion_row(
+        status="confirmed", action="threshold-adjust", signature_id=2008581, confirmed_at=_NOW
+    )
+    conn.fetchrow = AsyncMock(side_effect=[row, confirmed])
+
+    with patch("app.routers.tuning.apply_threshold", new=AsyncMock()) as mock_threshold:
+        resp = client.post(f"/api/tuning/{_SIG_ID}/confirm")
+
+    assert resp.status_code == 200
+    mock_threshold.assert_awaited_once_with(2008581, 5, 60, "by_src", "limit")
+
+
+def test_confirm_threshold_adjust_skips_apply_when_no_sig_id(authed_client):
+    client, conn = authed_client
+    row = _fake_suggestion_row(action="threshold-adjust", signature_id=None)
+    confirmed = _fake_suggestion_row(
+        status="confirmed", action="threshold-adjust", signature_id=None, confirmed_at=_NOW
+    )
+    conn.fetchrow = AsyncMock(side_effect=[row, confirmed])
+
+    with patch("app.routers.tuning.apply_threshold", new=AsyncMock()) as mock_threshold:
+        resp = client.post(f"/api/tuning/{_SIG_ID}/confirm")
+
+    assert resp.status_code == 200
+    mock_threshold.assert_not_awaited()
 
 
 def test_confirm_suggestion_404(authed_client):

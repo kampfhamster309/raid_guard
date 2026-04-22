@@ -294,8 +294,19 @@ export async function fetchTuningSuggestions(): Promise<TuningSuggestion[]> {
   return res.json() as Promise<TuningSuggestion[]>;
 }
 
-export async function confirmSuggestion(id: string): Promise<TuningSuggestion> {
-  const res = await authFetch(`/api/tuning/${id}/confirm`, { method: "POST" });
+export interface ThresholdParams {
+  threshold_count: number;
+  threshold_seconds: number;
+  threshold_track: string;
+  threshold_type: string;
+}
+
+export async function confirmSuggestion(id: string, params?: ThresholdParams): Promise<TuningSuggestion> {
+  const res = await authFetch(`/api/tuning/${id}/confirm`, {
+    method: "POST",
+    headers: params ? { "Content-Type": "application/json" } : {},
+    body: params ? JSON.stringify(params) : undefined,
+  });
   return res.json() as Promise<TuningSuggestion>;
 }
 

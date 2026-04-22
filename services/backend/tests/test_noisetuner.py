@@ -33,14 +33,22 @@ _SAMPLE_SIGS = [
 _GOOD_SUGGESTIONS = {
     "suggestions": [
         {
-            "signature":  "ET SCAN Potential SSH Scan",
-            "assessment": "Typical home-network IoT scanning; rarely indicates a real attack.",
-            "action":     "suppress",
+            "signature":         "ET SCAN Potential SSH Scan",
+            "assessment":        "Typical home-network IoT scanning; rarely indicates a real attack.",
+            "action":            "suppress",
+            "threshold_type":    None,
+            "threshold_track":   None,
+            "threshold_count":   None,
+            "threshold_seconds": None,
         },
         {
-            "signature":  "ET INFO Session Traversal Utls",
-            "assessment": "STUN traffic from VoIP or WebRTC apps; benign on home networks.",
-            "action":     "threshold-adjust",
+            "signature":         "ET INFO Session Traversal Utls",
+            "assessment":        "STUN traffic from VoIP or WebRTC apps; benign on home networks.",
+            "action":            "threshold-adjust",
+            "threshold_type":    "limit",
+            "threshold_track":   "by_src",
+            "threshold_count":   5,
+            "threshold_seconds": 60,
         },
     ]
 }
@@ -126,6 +134,60 @@ async def test_call_tuner_llm_returns_none_on_invalid_json():
 
 
 @pytest.mark.asyncio
+async def test_call_tuner_llm_extracts_threshold_params():
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(
+        return_value=_make_openai_response(json.dumps(_GOOD_SUGGESTIONS))
+    )
+    result = await _call_tuner_llm(client, "prompt", "gemma", 90.0, _SAMPLE_SIGS)
+    assert result is not None
+    threshold_item = next(r for r in result if r["action"] == "threshold-adjust")
+    assert threshold_item["threshold_type"] == "limit"
+    assert threshold_item["threshold_track"] == "by_src"
+    assert threshold_item["threshold_count"] == 5
+    assert threshold_item["threshold_seconds"] == 60
+
+
+@pytest.mark.asyncio
+async def test_call_tuner_llm_nulls_threshold_params_for_suppress():
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(
+        return_value=_make_openai_response(json.dumps(_GOOD_SUGGESTIONS))
+    )
+    result = await _call_tuner_llm(client, "prompt", "gemma", 90.0, _SAMPLE_SIGS)
+    assert result is not None
+    suppress_item = next(r for r in result if r["action"] == "suppress")
+    assert suppress_item["threshold_count"] is None
+    assert suppress_item["threshold_seconds"] is None
+    assert suppress_item["threshold_track"] is None
+    assert suppress_item["threshold_type"] is None
+
+
+@pytest.mark.asyncio
+async def test_call_tuner_llm_clamps_invalid_threshold_track():
+    bad_track = {
+        "suggestions": [
+            {
+                "signature":         "ET INFO Session Traversal Utls",
+                "assessment":        "STUN traffic.",
+                "action":            "threshold-adjust",
+                "threshold_type":    "limit",
+                "threshold_track":   "invalid_value",
+                "threshold_count":   5,
+                "threshold_seconds": 60,
+            },
+        ]
+    }
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(
+        return_value=_make_openai_response(json.dumps(bad_track))
+    )
+    result = await _call_tuner_llm(client, "prompt", "gemma", 90.0, _SAMPLE_SIGS)
+    assert result is not None
+    assert result[0]["threshold_track"] == "by_src"
+
+
+@pytest.mark.asyncio
 async def test_call_tuner_llm_clamps_unknown_action():
     bad = {
         "suggestions": [
@@ -155,7 +217,8 @@ async def test_has_enough_history_true():
 @pytest.mark.asyncio
 async def test_has_enough_history_false_too_recent():
     from datetime import timedelta
-    pool, conn = _make_pool(fetchval_result=_NOW - timedelta(days=3))
+    recent = datetime.now(timezone.utc) - timedelta(days=3)
+    pool, conn = _make_pool(fetchval_result=recent)
     result = await _has_enough_history(pool, 7)
     assert result is False
 
@@ -246,6 +309,10 @@ async def test_run_tuner_creates_suggestions(monkeypatch):
         "action": "suppress",
         "status": "pending",
         "confirmed_at": None,
+        "threshold_count": None,
+        "threshold_seconds": None,
+        "threshold_track": None,
+        "threshold_type": None,
     }
     conn.fetchrow = AsyncMock(return_value=inserted_row)
 

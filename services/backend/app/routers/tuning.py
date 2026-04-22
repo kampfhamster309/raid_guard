@@ -1,24 +1,26 @@
 """Tuning suggestions API — GET/POST /api/tuning/… (RAID-015b)."""
 
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..auth import require_admin, require_auth
 from ..dependencies import get_pool
 from ..llm_config import get_llm_config
 from ..noisetuner import _row_to_dict, generate_tuning_suggestions
-from ..rule_manager import apply_suppression
+from ..rule_manager import apply_suppression, apply_threshold
 
 router = APIRouter(prefix="/api/tuning", tags=["tuning"])
 
 _COLS = (
     "id, created_at, signature, signature_id, "
-    "hit_count, assessment, action, status, confirmed_at"
+    "hit_count, assessment, action, status, confirmed_at, "
+    "threshold_count, threshold_seconds, threshold_track, threshold_type"
 )
 
 
@@ -35,6 +37,17 @@ class TuningSuggestion(BaseModel):
     action: str
     status: str
     confirmed_at: datetime | None
+    threshold_count: int | None = None
+    threshold_seconds: int | None = None
+    threshold_track: str | None = None
+    threshold_type: str | None = None
+
+
+class ConfirmBody(BaseModel):
+    threshold_count: int = Field(default=5, ge=1)
+    threshold_seconds: int = Field(default=60, ge=1)
+    threshold_track: Literal["by_src", "by_dst"] = "by_src"
+    threshold_type: Literal["limit", "threshold", "both"] = "limit"
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -57,13 +70,16 @@ async def list_suggestions(
 @router.post("/{suggestion_id}/confirm", response_model=TuningSuggestion)
 async def confirm_suggestion(
     suggestion_id: UUID,
+    body: ConfirmBody | None = None,
     pool: asyncpg.Pool = Depends(get_pool),
     _: str = Depends(require_admin),
 ):
     """Confirm a tuning suggestion.
 
-    For ``suppress`` suggestions that have a ``signature_id``, a Suricata
-    suppress directive is written and a live rule reload is triggered.
+    - ``suppress``: writes a Suricata suppress directive and reloads rules.
+    - ``threshold-adjust``: writes a threshold directive using ``body`` params
+      (defaults: limit/by_src/count=5/seconds=60 if body is omitted).
+    - ``keep``: marks confirmed with no file changes.
     """
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -86,17 +102,27 @@ async def confirm_suggestion(
             suggestion_id,
         )
 
-    # Apply suppression rule if action is suppress and we have a sig id
+    import logging
+    _log = logging.getLogger(__name__)
+
     if row["action"] == "suppress" and row["signature_id"] is not None:
         try:
             await apply_suppression(row["signature_id"])
         except RuntimeError as exc:
-            # Suppression file was written but Suricata reload failed — not fatal
-            # (the rule will be applied on the next manual reload).
-            import logging
-            logging.getLogger(__name__).warning(
-                "Tuning: suppression rule written but reload failed: %s", exc
+            _log.warning("Tuning: suppression written but reload failed: %s", exc)
+
+    elif row["action"] == "threshold-adjust" and row["signature_id"] is not None:
+        params = body or ConfirmBody()
+        try:
+            await apply_threshold(
+                row["signature_id"],
+                params.threshold_count,
+                params.threshold_seconds,
+                params.threshold_track,
+                params.threshold_type,
             )
+        except RuntimeError as exc:
+            _log.warning("Tuning: threshold written but reload failed: %s", exc)
 
     return TuningSuggestion(**_row_to_dict(updated))
 

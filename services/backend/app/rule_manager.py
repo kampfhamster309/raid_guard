@@ -314,3 +314,47 @@ async def apply_suppression(signature_id: int) -> None:
     """
     await asyncio.to_thread(_append_suppression_sync, signature_id)
     await reload_suricata()
+
+
+# ── Threshold management ──────────────────────────────────────────────────────
+
+
+def _append_threshold_sync(
+    signature_id: int,
+    count: int,
+    seconds: int,
+    track: str,
+    type_: str,
+) -> None:
+    """Append a Suricata threshold directive to suppress.conf (synchronous).
+
+    Both suppress and threshold directives live in the same file referenced by
+    the ``threshold-file`` directive in suricata.yaml.
+    """
+    SUPPRESS_CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
+    line = (
+        f"threshold gen_id 1, sig_id {signature_id},"
+        f" type {type_}, track {track},"
+        f" count {count}, seconds {seconds}\n"
+    )
+    with open(SUPPRESS_CONF_PATH, "a") as f:
+        f.write(line)
+    logger.info(
+        "Appended threshold for sig_id=%d (%s/%s count=%d seconds=%d) to %s",
+        signature_id, type_, track, count, seconds, SUPPRESS_CONF_PATH,
+    )
+
+
+async def apply_threshold(
+    signature_id: int,
+    count: int,
+    seconds: int,
+    track: str = "by_src",
+    type_: str = "limit",
+) -> None:
+    """Write a threshold directive and trigger a live Suricata rule reload.
+
+    Raises RuntimeError if the reload fails.
+    """
+    await asyncio.to_thread(_append_threshold_sync, signature_id, count, seconds, track, type_)
+    await reload_suricata()

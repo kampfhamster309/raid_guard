@@ -146,4 +146,8 @@ export interface TuningSuggestion {
   action: TuningAction;
   status: TuningStatus;
   confirmed_at: string | null;
+  threshold_count: number | null;
+  threshold_seconds: number | null;
+  threshold_track: string | null;
+  threshold_type: string | null;
 }

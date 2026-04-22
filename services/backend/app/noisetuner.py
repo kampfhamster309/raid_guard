@@ -66,7 +66,22 @@ Guidelines:
   for this threat model.
 - assessment must be 1-2 sentences — concise and actionable.
 - Your response must contain exactly one entry per input signature, in the
-  same order, with the exact signature string unchanged.\
+  same order, with the exact signature string unchanged.
+
+For "threshold-adjust" suggestions, also provide concrete Suricata threshold
+parameters:
+  threshold_type   — "limit" (alert at most N times per window, recommended
+                     for noisy but valid rules) or "threshold" (alert once
+                     after every N events) or "both".
+  threshold_track  — "by_src" (per source IP, most common) or "by_dst".
+  threshold_count  — integer: how many events before alerting / the cap.
+  threshold_seconds — integer: the time window in seconds.
+
+Example: a rule firing hundreds of times from the same host could use
+  type=limit, track=by_src, count=3, seconds=60
+  meaning "alert at most 3 times per minute per source IP".
+
+For "suppress" and "keep" actions set all four threshold fields to null.\
 """
 
 _TUNER_RESPONSE_FORMAT: dict = {
@@ -82,11 +97,19 @@ _TUNER_RESPONSE_FORMAT: dict = {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "signature":  {"type": "string"},
-                            "assessment": {"type": "string"},
-                            "action":     {"type": "string"},
+                            "signature":          {"type": "string"},
+                            "assessment":         {"type": "string"},
+                            "action":             {"type": "string"},
+                            "threshold_type":     {"type": ["string", "null"]},
+                            "threshold_track":    {"type": ["string", "null"]},
+                            "threshold_count":    {"type": ["integer", "null"]},
+                            "threshold_seconds":  {"type": ["integer", "null"]},
                         },
-                        "required": ["signature", "assessment", "action"],
+                        "required": [
+                            "signature", "assessment", "action",
+                            "threshold_type", "threshold_track",
+                            "threshold_count", "threshold_seconds",
+                        ],
                         "additionalProperties": False,
                     },
                 }
@@ -275,13 +298,37 @@ async def _call_tuner_llm(
                     action, sig,
                 )
                 action = "keep"
+
+            # Extract threshold params — only meaningful for threshold-adjust.
+            t_count   = item.get("threshold_count")
+            t_seconds = item.get("threshold_seconds")
+            t_track   = item.get("threshold_track")
+            t_type    = item.get("threshold_type")
+
+            if action == "threshold-adjust":
+                # Clamp to valid values; fall back to sensible defaults if LLM drifts.
+                if t_track not in ("by_src", "by_dst"):
+                    t_track = "by_src"
+                if t_type not in ("limit", "threshold", "both"):
+                    t_type = "limit"
+                if not isinstance(t_count, int) or t_count < 1:
+                    t_count = 5
+                if not isinstance(t_seconds, int) or t_seconds < 1:
+                    t_seconds = 60
+            else:
+                t_count = t_seconds = t_track = t_type = None
+
             original = sig_lookup.get(sig)
             validated.append({
-                "signature":    sig,
-                "signature_id": original["signature_id"] if original else None,
-                "hit_count":    original["hit_count"] if original else 0,
-                "assessment":   assessment,
-                "action":       action,
+                "signature":         sig,
+                "signature_id":      original["signature_id"] if original else None,
+                "hit_count":         original["hit_count"] if original else 0,
+                "assessment":        assessment,
+                "action":            action,
+                "threshold_count":   t_count,
+                "threshold_seconds": t_seconds,
+                "threshold_track":   t_track,
+                "threshold_type":    t_type,
             })
         return validated if validated else None
 
@@ -358,16 +405,22 @@ async def _run_tuner(pool) -> list[dict] | None:
                 row = await conn.fetchrow(
                     """
                     INSERT INTO tuning_suggestions
-                        (signature, signature_id, hit_count, assessment, action)
-                    VALUES ($1, $2, $3, $4, $5)
+                        (signature, signature_id, hit_count, assessment, action,
+                         threshold_count, threshold_seconds, threshold_track, threshold_type)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                     RETURNING id, created_at, signature, signature_id,
-                              hit_count, assessment, action, status, confirmed_at
+                              hit_count, assessment, action, status, confirmed_at,
+                              threshold_count, threshold_seconds, threshold_track, threshold_type
                     """,
                     s["signature"],
                     s["signature_id"],
                     s["hit_count"],
                     s["assessment"],
                     s["action"],
+                    s.get("threshold_count"),
+                    s.get("threshold_seconds"),
+                    s.get("threshold_track"),
+                    s.get("threshold_type"),
                 )
                 created.append(_row_to_dict(row))
     except Exception as exc:
@@ -380,15 +433,19 @@ async def _run_tuner(pool) -> list[dict] | None:
 
 def _row_to_dict(row) -> dict:
     return {
-        "id":           str(row["id"]),
-        "created_at":   row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else str(row["created_at"]),
-        "signature":    row["signature"],
-        "signature_id": row["signature_id"],
-        "hit_count":    row["hit_count"],
-        "assessment":   row["assessment"],
-        "action":       row["action"],
-        "status":       row["status"],
-        "confirmed_at": row["confirmed_at"].isoformat() if row["confirmed_at"] and isinstance(row["confirmed_at"], datetime) else None,
+        "id":                str(row["id"]),
+        "created_at":        row["created_at"].isoformat() if isinstance(row["created_at"], datetime) else str(row["created_at"]),
+        "signature":         row["signature"],
+        "signature_id":      row["signature_id"],
+        "hit_count":         row["hit_count"],
+        "assessment":        row["assessment"],
+        "action":            row["action"],
+        "status":            row["status"],
+        "confirmed_at":      row["confirmed_at"].isoformat() if row["confirmed_at"] and isinstance(row["confirmed_at"], datetime) else None,
+        "threshold_count":   row["threshold_count"],
+        "threshold_seconds": row["threshold_seconds"],
+        "threshold_track":   row["threshold_track"],
+        "threshold_type":    row["threshold_type"],
     }
 
 
