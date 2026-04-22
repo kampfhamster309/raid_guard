@@ -38,12 +38,15 @@ def test_stats_hourly_data(authed_client):
     client, conn = authed_client
     conn.fetchval = AsyncMock(return_value=5)
 
-    hourly = [{"hour": datetime(2024, 6, 1, 10, 0, tzinfo=timezone.utc), "count": 5}]
+    hourly = [{"hour": datetime(2024, 6, 1, 10, 0, tzinfo=timezone.utc), "info": 3, "warning": 1, "critical": 1}]
     conn.fetch = AsyncMock(side_effect=[hourly, [], []])
 
     body = client.get("/api/stats").json()
     assert len(body["alerts_per_hour"]) == 1
-    assert body["alerts_per_hour"][0]["count"] == 5
+    entry = body["alerts_per_hour"][0]
+    assert entry["info"] == 3
+    assert entry["warning"] == 1
+    assert entry["critical"] == 1
 
 
 def test_stats_top_ips(authed_client):

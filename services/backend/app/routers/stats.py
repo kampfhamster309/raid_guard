@@ -12,7 +12,9 @@ router = APIRouter(prefix="/api", tags=["stats"])
 
 class HourlyCount(BaseModel):
     hour: datetime
-    count: int
+    info: int
+    warning: int
+    critical: int
 
 
 class TopItem(BaseModel):
@@ -39,9 +41,12 @@ async def get_stats(
         ) or 0
 
         hourly_rows = await conn.fetch(
-            "SELECT date_trunc('hour', timestamp) AS hour, COUNT(*) AS count "
-            "FROM alerts WHERE timestamp > NOW() - INTERVAL '24 hours' "
-            "GROUP BY hour ORDER BY hour"
+            "SELECT date_trunc('hour', timestamp) AS hour,"
+            " COUNT(*) FILTER (WHERE severity = 'info') AS info,"
+            " COUNT(*) FILTER (WHERE severity = 'warning') AS warning,"
+            " COUNT(*) FILTER (WHERE severity = 'critical') AS critical"
+            " FROM alerts WHERE timestamp > NOW() - INTERVAL '24 hours'"
+            " GROUP BY hour ORDER BY hour"
         )
 
         ip_rows = await conn.fetch(
@@ -61,7 +66,8 @@ async def get_stats(
     return StatsResponse(
         total_alerts_24h=total,
         alerts_per_hour=[
-            HourlyCount(hour=r["hour"], count=r["count"]) for r in hourly_rows
+            HourlyCount(hour=r["hour"], info=r["info"], warning=r["warning"], critical=r["critical"])
+            for r in hourly_rows
         ],
         top_src_ips=[TopItem(name=r["name"], count=r["count"]) for r in ip_rows],
         top_signatures=[TopItem(name=r["name"], count=r["count"]) for r in sig_rows],

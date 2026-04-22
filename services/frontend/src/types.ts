@@ -34,7 +34,9 @@ export type WsStatus = "connecting" | "connected" | "disconnected";
 
 export interface HourlyCount {
   hour: string;
-  count: number;
+  info: number;
+  warning: number;
+  critical: number;
 }
 
 export interface TopItem {

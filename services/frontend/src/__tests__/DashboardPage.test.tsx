@@ -18,7 +18,7 @@ global.ResizeObserver = class ResizeObserver {
 
 const STATS: Stats = {
   total_alerts_24h: 142,
-  alerts_per_hour: [{ hour: "2026-04-10T12:00:00", count: 10 }],
+  alerts_per_hour: [{ hour: "2026-04-10T12:00:00", info: 5, warning: 3, critical: 2 }],
   top_src_ips: [{ name: "192.168.1.1", count: 30 }],
   top_signatures: [{ name: "ET SCAN", count: 20 }],
 };
