@@ -92,7 +92,7 @@ docker compose up
 | Backend API | http://localhost:8000 |
 | Backend health (no auth) | http://localhost:8000/health |
 | Swagger UI | http://localhost:8000/docs |
-| Frontend (nginx placeholder) | http://localhost:3000 |
+| Frontend (React PWA) | http://localhost:3000 |
 
 ---
 
