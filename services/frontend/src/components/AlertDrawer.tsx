@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Alert, AlertEnrichment } from "../types";
 import { SeverityBadge } from "./SeverityBadge";
-import { blockDomain, fetchLlmSettings, fetchPiholeSettings, reEnrichAlert } from "../api";
+import { blockDomain, blockFritzDevice, fetchFritzStatus, fetchLlmSettings, fetchPiholeSettings, reEnrichAlert } from "../api";
 
 interface Props {
   alert: Alert | null;
@@ -43,6 +43,12 @@ export function AlertDrawer({ alert, onClose }: Props) {
   const [enriching, setEnriching] = useState(false);
   const [enrichError, setEnrichError] = useState<string | null>(null);
 
+  const [fritzAvailable, setFritzAvailable] = useState(false);
+  const [quarantineIp, setQuarantineIp] = useState("");
+  const [quarantining, setQuarantining] = useState(false);
+  const [quarantineStatus, setQuarantineStatus] = useState<"idle" | "success" | "error">("idle");
+  const [quarantineMessage, setQuarantineMessage] = useState<string | null>(null);
+
   useEffect(() => {
     if (!alert) return;
     const handler = (e: KeyboardEvent) => {
@@ -60,6 +66,9 @@ export function AlertDrawer({ alert, onClose }: Props) {
     setBlockInput(extractDomain(alert.raw_json));
     setEnrichmentJson(alert.enrichment_json);
     setEnrichError(null);
+    setQuarantineIp(alert.src_ip ?? "");
+    setQuarantineStatus("idle");
+    setQuarantineMessage(null);
 
     fetchPiholeSettings()
       .then((s) => setPiholeConfigured(s.configured && s.enabled))
@@ -68,6 +77,10 @@ export function AlertDrawer({ alert, onClose }: Props) {
     fetchLlmSettings()
       .then((s) => setLlmConfigured(s.url.trim() !== "" && s.model.trim() !== ""))
       .catch(() => setLlmConfigured(false));
+
+    fetchFritzStatus()
+      .then((s) => setFritzAvailable(s.configured && s.connected && s.host_filter_available))
+      .catch(() => setFritzAvailable(false));
   }, [alert]);
 
   const handleBlock = async () => {
@@ -99,6 +112,24 @@ export function AlertDrawer({ alert, onClose }: Props) {
       setEnrichError(e instanceof Error ? e.message : "AI analysis failed");
     } finally {
       setEnriching(false);
+    }
+  };
+
+  const handleQuarantine = async () => {
+    const ip = quarantineIp.trim();
+    if (!ip) return;
+    setQuarantining(true);
+    setQuarantineStatus("idle");
+    setQuarantineMessage(null);
+    try {
+      await blockFritzDevice(ip, `Quarantined from alert #${alert!.id.slice(-8)}`);
+      setQuarantineStatus("success");
+      setQuarantineMessage(`${ip} quarantined — WAN access cut off.`);
+    } catch (e) {
+      setQuarantineStatus("error");
+      setQuarantineMessage(e instanceof Error ? e.message : "Quarantine failed");
+    } finally {
+      setQuarantining(false);
     }
   };
 
@@ -229,6 +260,42 @@ export function AlertDrawer({ alert, onClose }: Props) {
                     }`}
                   >
                     {blockMessage}
+                  </p>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* Fritzbox device quarantine */}
+          {fritzAvailable && (
+            <section>
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                Quarantine Device
+              </h2>
+              <div className="bg-slate-800 rounded p-3 space-y-2">
+                <p className="text-xs text-slate-400">
+                  Cut off WAN access for a LAN device via Fritzbox. Only works for devices on your local network.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={quarantineIp}
+                    onChange={(e) => setQuarantineIp(e.target.value)}
+                    placeholder="192.168.178.x"
+                    aria-label="Device IP to quarantine"
+                    className="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-1.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                  <button
+                    onClick={() => void handleQuarantine()}
+                    disabled={quarantining || !quarantineIp.trim() || quarantineStatus === "success"}
+                    className="px-3 py-1.5 text-xs font-medium rounded bg-amber-700 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-white"
+                  >
+                    {quarantining ? "Quarantining…" : "Quarantine"}
+                  </button>
+                </div>
+                {quarantineMessage && (
+                  <p className={`text-xs ${quarantineStatus === "success" ? "text-emerald-400" : "text-red-400"}`}>
+                    {quarantineMessage}
                   </p>
                 )}
               </div>

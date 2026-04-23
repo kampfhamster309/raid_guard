@@ -6,7 +6,9 @@ import * as api from "../api";
 vi.mock("../api", () => ({
   fetchPiholeSettings: vi.fn().mockResolvedValue({ configured: false, enabled: false, url: "" }),
   fetchLlmSettings: vi.fn().mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 }),
+  fetchFritzStatus: vi.fn().mockResolvedValue({ configured: false, connected: false, host_filter_available: false, model: "", firmware: "" }),
   blockDomain: vi.fn(),
+  blockFritzDevice: vi.fn(),
   reEnrichAlert: vi.fn(),
 }));
 
@@ -36,6 +38,7 @@ describe("AlertDrawer", () => {
   beforeEach(() => {
     vi.mocked(api.fetchPiholeSettings).mockResolvedValue({ configured: false, enabled: false, url: "" });
     vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchFritzStatus).mockResolvedValue({ configured: false, connected: false, host_filter_available: false, model: "", firmware: "" });
   });
 
   it("renders nothing when alert is null", () => {
@@ -141,5 +144,44 @@ describe("AlertDrawer", () => {
       expect(screen.getByText("LLM timed out — try again")).toBeInTheDocument()
     );
     expect(screen.getByRole("button", { name: /request ai analysis/i })).toBeInTheDocument();
+  });
+
+  it("does not show Quarantine section when Fritz not configured", () => {
+    render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);
+    expect(screen.queryByText(/quarantine device/i)).not.toBeInTheDocument();
+  });
+
+  it("shows Quarantine section with src_ip pre-filled when Fritz is available", async () => {
+    vi.mocked(api.fetchFritzStatus).mockResolvedValue({ configured: true, connected: true, host_filter_available: true, model: "FRITZ!Box 6660", firmware: "7.57" });
+    render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);
+    await screen.findByText(/quarantine device/i);
+    expect(screen.getByLabelText(/device ip to quarantine/i)).toHaveValue("10.0.0.1");
+  });
+
+  it("calls blockFritzDevice with src_ip and shows success", async () => {
+    vi.mocked(api.fetchFritzStatus).mockResolvedValue({ configured: true, connected: true, host_filter_available: true, model: "FRITZ!Box 6660", firmware: "7.57" });
+    vi.mocked(api.blockFritzDevice).mockResolvedValue({ id: "x", blocked_at: "", ip: "10.0.0.1", hostname: null, comment: null });
+
+    render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);
+    await screen.findByRole("button", { name: /^quarantine$/i });
+    fireEvent.click(screen.getByRole("button", { name: /^quarantine$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/quarantined — wan access cut off/i)).toBeInTheDocument()
+    );
+    expect(api.blockFritzDevice).toHaveBeenCalledWith("10.0.0.1", expect.stringContaining("alert"));
+  });
+
+  it("shows error when blockFritzDevice fails", async () => {
+    vi.mocked(api.fetchFritzStatus).mockResolvedValue({ configured: true, connected: true, host_filter_available: true, model: "FRITZ!Box 6660", firmware: "7.57" });
+    vi.mocked(api.blockFritzDevice).mockRejectedValue(new Error("Device not found"));
+
+    render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);
+    await screen.findByRole("button", { name: /^quarantine$/i });
+    fireEvent.click(screen.getByRole("button", { name: /^quarantine$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText("Device not found")).toBeInTheDocument()
+    );
   });
 });
