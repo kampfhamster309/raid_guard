@@ -33,6 +33,7 @@ _SAMPLE_SIGS = [
 _GOOD_SUGGESTIONS = {
     "suggestions": [
         {
+            "signature_id":      2001219,
             "signature":         "ET SCAN Potential SSH Scan",
             "assessment":        "Typical home-network IoT scanning; rarely indicates a real attack.",
             "action":            "suppress",
@@ -42,6 +43,7 @@ _GOOD_SUGGESTIONS = {
             "threshold_seconds": None,
         },
         {
+            "signature_id":      2008581,
             "signature":         "ET INFO Session Traversal Utls",
             "assessment":        "STUN traffic from VoIP or WebRTC apps; benign on home networks.",
             "action":            "threshold-adjust",
@@ -96,6 +98,18 @@ def test_build_tuner_prompt_includes_lookback_days():
 def test_build_tuner_prompt_includes_distinct_ips():
     prompt = _build_tuner_prompt(_SAMPLE_SIGS, 7)
     assert "3 distinct source IP" in prompt
+
+
+def test_build_tuner_prompt_includes_signature_ids():
+    prompt = _build_tuner_prompt(_SAMPLE_SIGS, 7)
+    assert "2001219" in prompt
+    assert "2008581" in prompt
+
+
+def test_build_tuner_prompt_separates_signature_from_stats():
+    prompt = _build_tuner_prompt(_SAMPLE_SIGS, 7)
+    # Signature name must appear on its own labeled line, not merged with hit counts
+    assert "signature: ET SCAN Potential SSH Scan" in prompt
 
 
 # ── _call_tuner_llm ───────────────────────────────────────────────────────────
@@ -164,10 +178,35 @@ async def test_call_tuner_llm_nulls_threshold_params_for_suppress():
 
 
 @pytest.mark.asyncio
+async def test_call_tuner_llm_uses_echoed_signature_id():
+    """LLM-echoed signature_id takes priority over string lookup."""
+    data = {
+        "suggestions": [{
+            "signature_id":      9999999,  # not in sig_lookup but LLM echoed it
+            "signature":         "ET SCAN Potential SSH Scan slightly rephrased",
+            "assessment":        "Noise.",
+            "action":            "suppress",
+            "threshold_type":    None,
+            "threshold_track":   None,
+            "threshold_count":   None,
+            "threshold_seconds": None,
+        }]
+    }
+    client = AsyncMock()
+    client.chat.completions.create = AsyncMock(
+        return_value=_make_openai_response(json.dumps(data))
+    )
+    result = await _call_tuner_llm(client, "prompt", "gemma", 90.0, _SAMPLE_SIGS)
+    assert result is not None
+    assert result[0]["signature_id"] == 9999999
+
+
+@pytest.mark.asyncio
 async def test_call_tuner_llm_clamps_invalid_threshold_track():
     bad_track = {
         "suggestions": [
             {
+                "signature_id":      2008581,
                 "signature":         "ET INFO Session Traversal Utls",
                 "assessment":        "STUN traffic.",
                 "action":            "threshold-adjust",
@@ -191,7 +230,10 @@ async def test_call_tuner_llm_clamps_invalid_threshold_track():
 async def test_call_tuner_llm_clamps_unknown_action():
     bad = {
         "suggestions": [
-            {"signature": "ET SCAN Potential SSH Scan", "assessment": "ok", "action": "YOLO"},
+            {"signature_id": 2001219, "signature": "ET SCAN Potential SSH Scan",
+             "assessment": "ok", "action": "YOLO",
+             "threshold_type": None, "threshold_track": None,
+             "threshold_count": None, "threshold_seconds": None},
         ]
     }
     client = AsyncMock()
@@ -322,9 +364,14 @@ async def test_run_tuner_creates_suggestions(monkeypatch):
             return_value=_make_openai_response(
                 json.dumps({
                     "suggestions": [{
-                        "signature": "ET SCAN Potential SSH Scan",
-                        "assessment": "Typical scanning noise.",
-                        "action": "suppress",
+                        "signature_id":      2001219,
+                        "signature":         "ET SCAN Potential SSH Scan",
+                        "assessment":        "Typical scanning noise.",
+                        "action":            "suppress",
+                        "threshold_type":    None,
+                        "threshold_track":   None,
+                        "threshold_count":   None,
+                        "threshold_seconds": None,
                     }]
                 })
             )

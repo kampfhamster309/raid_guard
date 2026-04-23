@@ -97,6 +97,7 @@ _TUNER_RESPONSE_FORMAT: dict = {
                     "items": {
                         "type": "object",
                         "properties": {
+                            "signature_id":       {"type": ["integer", "null"]},
                             "signature":          {"type": "string"},
                             "assessment":         {"type": "string"},
                             "action":             {"type": "string"},
@@ -106,7 +107,7 @@ _TUNER_RESPONSE_FORMAT: dict = {
                             "threshold_seconds":  {"type": ["integer", "null"]},
                         },
                         "required": [
-                            "signature", "assessment", "action",
+                            "signature_id", "signature", "assessment", "action",
                             "threshold_type", "threshold_track",
                             "threshold_count", "threshold_seconds",
                         ],
@@ -236,16 +237,15 @@ def _build_tuner_prompt(sigs: list[dict], lookback_days: int) -> str:
         f"Alert signatures from the past {lookback_days} days (info/warning severity only):",
         "",
     ]
-    for s in sigs:
-        src_note = (
-            f" — {s['distinct_src_ips']} distinct source IP(s)"
-            if s.get("distinct_src_ips", 0) > 0
-            else ""
-        )
-        lines.append(f"  {s['hit_count']:>6} hits  |  {s['signature']}{src_note}")
+    for i, s in enumerate(sigs, 1):
+        lines.append(f"[{i}] signature_id={s['signature_id'] or 'unknown'}")
+        lines.append(f"    signature: {s['signature']}")
+        src_note = f", {s['distinct_src_ips']} distinct source IP(s)" if s.get("distinct_src_ips", 0) > 0 else ""
+        lines.append(f"    hits: {s['hit_count']}{src_note}")
+        lines.append("")
     lines += [
-        "",
-        "For each signature, provide: assessment (1-2 sentences) and action "
+        "For each entry return the signature_id (integer, copy exactly from above) and "
+        "the signature string (copy exactly from above), plus assessment and action "
         "(suppress / threshold-adjust / keep).",
     ]
     return "\n".join(lines)
@@ -318,10 +318,15 @@ async def _call_tuner_llm(
             else:
                 t_count = t_seconds = t_track = t_type = None
 
+            # Prefer the echoed signature_id from the LLM; fall back to string lookup.
+            llm_sig_id = item.get("signature_id")
             original = sig_lookup.get(sig)
+            resolved_sig_id = llm_sig_id if isinstance(llm_sig_id, int) else (
+                original["signature_id"] if original else None
+            )
             validated.append({
                 "signature":         sig,
-                "signature_id":      original["signature_id"] if original else None,
+                "signature_id":      resolved_sig_id,
                 "hit_count":         original["hit_count"] if original else 0,
                 "assessment":        assessment,
                 "action":            action,
