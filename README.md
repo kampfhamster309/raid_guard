@@ -3,8 +3,9 @@
 > **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
 > configuration, Home Assistant push notifications, AI alert enrichment,
 > AI batch incident correlation, periodic security digests, AI-driven noise
-> tuning, Pi-hole DNS sinkholing, Fritzbox device quarantine, and PWA with
-> Web Push notifications are functional (RAID-001 through RAID-019).
+> tuning with live Suricata threshold application, Pi-hole DNS sinkholing,
+> Fritzbox device quarantine, and PWA with Web Push notifications are
+> functional (RAID-001 through RAID-021).
 > See `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
@@ -125,14 +126,15 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `POST` | `/api/auth/token` | Obtain a JWT (form: `username`, `password`) |
 | `GET` | `/api/alerts` | Paginated alert list — query params: `limit`, `offset`, `severity`, `src_ip`, `after`, `before` |
 | `GET` | `/api/alerts/{id}` | Single alert detail including raw EVE JSON |
-| `GET` | `/api/stats` | Last-24 h totals, hourly chart data, top source IPs, top signatures |
+| `POST` | `/api/alerts/{id}/enrich` | Trigger on-demand LLM enrichment for an alert (422 if LLM not configured, 504 on timeout) |
+| `GET` | `/api/stats` | Last-24 h totals, per-severity hourly chart data (`info`/`warning`/`critical`), top source IPs, top signatures |
 | `GET` | `/api/incidents` | Paginated incident list — query params: `limit` (default 20), `offset` |
 | `GET` | `/api/incidents/{id}` | Single incident detail including the full list of related alerts |
 | `GET` | `/api/digests` | Paginated digest list — query params: `limit` (default 10), `offset` |
 | `GET` | `/api/digests/{id}` | Single digest with full JSON content |
 | `POST` | `/api/digests/generate` | Trigger an immediate digest (200 with digest, 204 if too few alerts, 422 if LLM not configured) |
 | `GET` | `/api/tuning` | List pending tuning suggestions (ordered by hit count) |
-| `POST` | `/api/tuning/{id}/confirm` | Confirm suggestion (applies suppression rule if action=suppress + sig_id present) |
+| `POST` | `/api/tuning/{id}/confirm` | Confirm suggestion — applies suppression or threshold directive to Suricata and reloads rules; accepts optional JSON body with threshold params (`threshold_count`, `threshold_seconds`, `threshold_track`, `threshold_type`) for threshold-adjust suggestions |
 | `POST` | `/api/tuning/{id}/dismiss` | Dismiss suggestion without applying any change |
 | `POST` | `/api/tuning/run` | Trigger immediate tuning analysis (200 with suggestions list, 422 if LLM not configured) |
 | `GET` | `/api/rules/categories` | List ET Open rule categories with enabled/disabled state |
@@ -173,8 +175,8 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`, `incidents:new`, `digests:new`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher, batch correlator, periodic digest worker, noise tuner, rule management, notification router (HA push + Web Push), Pi-hole sinkhole client, Fritzbox TR-064 quarantine |
-| `frontend` | ✅ | React PWA — live alert feed, AI analysis drawer, stats dashboard, incidents view, digests view, unified blocklist (Pi-hole + Fritzbox), rule config, LLM + HA + Web Push settings, tuning suggestions |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher (bulk + on-demand), batch correlator, periodic digest worker, noise tuner with live Suricata threshold/suppress apply, rule management, notification router (HA push + Web Push), Pi-hole sinkhole client, Fritzbox TR-064 quarantine |
+| `frontend` | ✅ | React PWA — live alert feed, on-demand AI re-analysis, per-severity stacked bar chart, incidents view, digests view, unified blocklist (Pi-hole + Fritzbox), rule config, LLM + HA + Web Push settings, tuning suggestions with inline threshold form |
 
 ---
 
