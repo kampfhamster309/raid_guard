@@ -285,8 +285,11 @@ def _reload_suricata_sync() -> str:
             f"suricata-update exited {exit_code}. Last output: {output_str[-400:]}"
         )
 
-    container.kill(signal="SIGHUP")
-    logger.info("SIGHUP sent to %s — rules reloaded", SURICATA_CONTAINER_NAME)
+    # SIGHUP does not trigger rule reload in pcap/FIFO mode (it triggers shutdown
+    # instead). Container restart is the only reliable apply mechanism.
+    logger.info("Restarting %s to apply updated rules and threshold config", SURICATA_CONTAINER_NAME)
+    container.restart(timeout=10)
+    logger.info("%s restarted — rules and threshold config reloaded", SURICATA_CONTAINER_NAME)
     return "Rules updated and reloaded successfully."
 
 
