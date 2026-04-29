@@ -106,10 +106,17 @@ async def run_health_watcher(
     initial_delay: float = _DEFAULT_INITIAL_DELAY,
     poll_interval: float = _DEFAULT_POLL_INTERVAL,
 ) -> None:
-    """Long-running task — polls component health and notifies HA on transitions."""
-    webhook_url = os.environ.get("HA_WEBHOOK_URL", "").strip()
+    """Long-running task — polls component health and notifies HA on transitions.
+
+    Uses HA_HEALTH_WEBHOOK_URL when set; falls back to HA_WEBHOOK_URL so that
+    a single-webhook setup works without any extra configuration.
+    """
+    webhook_url = (
+        os.environ.get("HA_HEALTH_WEBHOOK_URL", "").strip()
+        or os.environ.get("HA_WEBHOOK_URL", "").strip()
+    )
     if not webhook_url:
-        logger.info("Health watcher: HA_WEBHOOK_URL not set; idle.")
+        logger.info("Health watcher: no webhook URL configured; idle.")
         return
 
     if initial_delay > 0:

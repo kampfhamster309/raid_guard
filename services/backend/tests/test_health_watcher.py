@@ -256,6 +256,7 @@ async def test_poll_once_detects_ingestor_crash():
 @pytest.mark.asyncio
 async def test_run_health_watcher_exits_when_no_webhook(monkeypatch):
     monkeypatch.delenv("HA_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("HA_HEALTH_WEBHOOK_URL", raising=False)
     pool = _make_pool()
     redis = _make_redis()
     app_state = _make_app_state()
@@ -265,6 +266,67 @@ async def test_run_health_watcher_exits_when_no_webhook(monkeypatch):
     )
     await asyncio.sleep(0.05)
     assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_run_health_watcher_uses_health_webhook_when_set(monkeypatch):
+    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/alerts")
+    monkeypatch.setenv("HA_HEALTH_WEBHOOK_URL", "http://ha.local/health")
+    pool = _make_pool()
+    redis = _make_redis()
+    app_state = _make_app_state()
+    # DB is unhealthy from the start → should notify on first poll
+    last_seen: list[str] = []
+
+    async def _capture_notify(url: str, component: str, ok: bool) -> None:
+        last_seen.append(url)
+
+    with (
+        patch("app.health_watcher._probe_db", AsyncMock(return_value=False)),
+        patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
+        patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._send_notification", AsyncMock(side_effect=_capture_notify)),
+    ):
+        task = asyncio.create_task(
+            run_health_watcher(pool, redis, app_state, initial_delay=0, poll_interval=9999)
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert last_seen == ["http://ha.local/health"]
+
+
+@pytest.mark.asyncio
+async def test_run_health_watcher_falls_back_to_alert_webhook(monkeypatch):
+    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/alerts")
+    monkeypatch.delenv("HA_HEALTH_WEBHOOK_URL", raising=False)
+    pool = _make_pool()
+    redis = _make_redis()
+    app_state = _make_app_state()
+    last_seen: list[str] = []
+
+    async def _capture_notify(url: str, component: str, ok: bool) -> None:
+        last_seen.append(url)
+
+    with (
+        patch("app.health_watcher._probe_db", AsyncMock(return_value=False)),
+        patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
+        patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._send_notification", AsyncMock(side_effect=_capture_notify)),
+    ):
+        task = asyncio.create_task(
+            run_health_watcher(pool, redis, app_state, initial_delay=0, poll_interval=9999)
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert last_seen == ["http://ha.local/alerts"]
 
 
 @pytest.mark.asyncio

@@ -224,7 +224,8 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `LM_ENRICHMENT_TIMEOUT` | `90` | LLM request timeout in seconds |
 | `LM_MAX_TOKENS` | `512` | Maximum tokens in the LLM response |
 | `PIHOLE_HOST` / `PIHOLE_PASSWORD` | — | Pi-hole v6 address and API password |
-| `HA_WEBHOOK_URL` | — | Home Assistant webhook URL (leave unset to disable HA push) |
+| `HA_WEBHOOK_URL` | — | Home Assistant webhook URL for IDS alert notifications (leave unset to disable HA push) |
+| `HA_HEALTH_WEBHOOK_URL` | — | Separate webhook for pipeline health alerts; falls back to `HA_WEBHOOK_URL` if not set |
 | `DASHBOARD_URL` | — | Public URL of the raid_guard dashboard — used to generate deep links in push notifications (e.g. `http://unraid:3000`) |
 | `VAPID_PRIVATE_KEY` | — | VAPID private key (base64url) — generate with `py_vapid` (see `.env.example`) |
 | `VAPID_PUBLIC_KEY` | — | VAPID public key (base64url) — served to browsers for push subscription |
@@ -346,6 +347,67 @@ action:
           sound: default
           interruption-level: critical  # iOS — bypasses silent mode
 ```
+
+---
+
+## Health alert notifications
+
+raid_guard can also notify you when a **pipeline component** becomes unhealthy
+or recovers (DB, Redis, Fritzbox Capture, Suricata, Alert Ingestor, AI Enricher).
+These events have a different payload shape from alert notifications and require
+a **separate webhook** so you can route them independently.
+
+### Payload reference
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| `title` | `raid_guard — Component Unhealthy` | `Component Unhealthy` or `Component Recovered` |
+| `message` | `TimescaleDB is unhealthy.` | Human-readable description |
+| `component` | `db` | Internal key (`db`, `redis`, `capture_agent`, `suricata`, `ingestor`, `enricher`) |
+| `component_label` | `TimescaleDB` | Display name |
+| `healthy` | `false` | `true` = recovered, `false` = unhealthy |
+| `timestamp` | `2026-04-11T14:32:00+00:00` | ISO 8601 event timestamp |
+
+### HA automation example
+
+Create a second webhook automation in HA for health events:
+
+```yaml
+alias: raid_guard health alert
+description: Notify when a pipeline component becomes unhealthy or recovers
+trigger:
+  - platform: webhook
+    webhook_id: raid_guard_health   # choose any unique ID
+    allowed_methods:
+      - POST
+    local_only: true
+condition: []
+action:
+  - service: notify.mobile_app_your_phone   # replace with your device
+    data:
+      title: "{{ trigger.json.title }}"
+      message: "{{ trigger.json.message }}"
+      data:
+        tag: "raid_guard_health_{{ trigger.json.component }}"
+        group: raid_guard_health
+        color: "{{ 'green' if trigger.json.healthy else 'red' }}"
+mode: queued
+max: 10
+```
+
+Copy the webhook URL from the trigger card, then add it to your `.env`:
+
+```bash
+HA_HEALTH_WEBHOOK_URL=http://<ha-host>:8123/api/webhook/raid_guard_health
+```
+
+> **Fallback behaviour:** If `HA_HEALTH_WEBHOOK_URL` is not set, health alerts
+> are sent to `HA_WEBHOOK_URL` instead. This means a single webhook setup works
+> without any extra configuration — both alert and health payloads hit the same
+> automation — but the alert automation's `tag` and `color` logic will not
+> render correctly for health events, so a dedicated webhook is recommended.
+
+Enable or disable health alerts at runtime in **Config → Notifications → Health Alerts**.
 
 ---
 
