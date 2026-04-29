@@ -463,7 +463,17 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
   const toggleHa = async () => {
     if (!haSettings) return;
     try {
-      const updated = await updateHaSettings(!haSettings.enabled);
+      const updated = await updateHaSettings({ enabled: !haSettings.enabled });
+      setHaSettings(updated);
+    } catch {
+      // leave state unchanged on error
+    }
+  };
+
+  const toggleHaHealthAlerts = async () => {
+    if (!haSettings) return;
+    try {
+      const updated = await updateHaSettings({ health_alerts_enabled: !haSettings.health_alerts_enabled });
       setHaSettings(updated);
     } catch {
       // leave state unchanged on error
@@ -728,6 +738,38 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
                   </button>
                 </div>
               </div>
+
+              {/* Health alerts sub-row */}
+              {haSettings?.configured && (
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-700/50">
+                  <div className="min-w-0 pr-4">
+                    <p className="text-sm font-medium text-slate-200">Health Alerts</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Notify when a pipeline component becomes unhealthy or recovers.
+                    </p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={haSettings?.health_alerts_enabled ?? true}
+                    aria-label="Health alert notifications"
+                    onClick={isAdmin ? () => void toggleHaHealthAlerts() : undefined}
+                    disabled={haLoading || !haSettings?.configured || !isAdmin}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-40 disabled:cursor-not-allowed ${
+                      haSettings?.health_alerts_enabled && haSettings?.configured
+                        ? "bg-indigo-600"
+                        : "bg-slate-600"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
+                        haSettings?.health_alerts_enabled && haSettings?.configured
+                          ? "translate-x-4"
+                          : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
 
               {testMessage && (
                 <div

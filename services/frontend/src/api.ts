@@ -133,11 +133,13 @@ export async function fetchHaSettings(): Promise<HaSettings> {
   return res.json() as Promise<HaSettings>;
 }
 
-export async function updateHaSettings(enabled: boolean): Promise<HaSettings> {
+export async function updateHaSettings(
+  params: { enabled?: boolean; health_alerts_enabled?: boolean }
+): Promise<HaSettings> {
   const res = await authFetch("/api/settings/ha", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify(params),
   });
   return res.json() as Promise<HaSettings>;
 }

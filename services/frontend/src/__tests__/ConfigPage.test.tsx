@@ -14,8 +14,8 @@ const CATEGORIES = [
   { id: "emerging-scan", name: "Scanning", description: "Port scans", enabled: true },
 ];
 
-const HA_CONFIGURED: api.HaSettings = { enabled: true, configured: true };
-const HA_NOT_CONFIGURED: api.HaSettings = { enabled: false, configured: false };
+const HA_CONFIGURED: api.HaSettings = { enabled: true, configured: true, health_alerts_enabled: true };
+const HA_NOT_CONFIGURED: api.HaSettings = { enabled: false, configured: false, health_alerts_enabled: true };
 
 const LLM_SETTINGS = { url: "http://lmstudio:1234/v1", model: "gemma-4-27b", timeout: 90, max_tokens: 512 };
 
@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.mocked(api.updateRuleCategories).mockResolvedValue(CATEGORIES);
   vi.mocked(api.reloadSuricata).mockResolvedValue("Rules updated.");
   vi.mocked(api.fetchHaSettings).mockResolvedValue(HA_CONFIGURED);
-  vi.mocked(api.updateHaSettings).mockResolvedValue({ enabled: false, configured: true });
+  vi.mocked(api.updateHaSettings).mockResolvedValue({ enabled: false, configured: true, health_alerts_enabled: true });
   vi.mocked(api.testHaSend).mockResolvedValue(undefined);
   vi.mocked(api.fetchLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.updateLlmSettings).mockResolvedValue(LLM_SETTINGS);
@@ -203,8 +203,38 @@ describe("ConfigPage — Home Assistant", () => {
     fireEvent.click(screen.getByRole("switch", { name: /home assistant notifications/i }));
 
     await waitFor(() => {
-      expect(api.updateHaSettings).toHaveBeenCalledWith(false);
+      expect(api.updateHaSettings).toHaveBeenCalledWith({ enabled: false });
     });
+  });
+
+  it("renders the health alerts sub-toggle when HA is configured", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Home Assistant");
+    expect(screen.getByRole("switch", { name: /health alert notifications/i })).toBeInTheDocument();
+  });
+
+  it("health alerts toggle is checked when health_alerts_enabled is true", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Home Assistant");
+    expect(screen.getByRole("switch", { name: /health alert notifications/i })).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("calls updateHaSettings with health_alerts_enabled when health alerts toggle is clicked", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Home Assistant");
+
+    fireEvent.click(screen.getByRole("switch", { name: /health alert notifications/i }));
+
+    await waitFor(() => {
+      expect(api.updateHaSettings).toHaveBeenCalledWith({ health_alerts_enabled: false });
+    });
+  });
+
+  it("hides health alerts sub-toggle when HA is not configured", async () => {
+    vi.mocked(api.fetchHaSettings).mockResolvedValue(HA_NOT_CONFIGURED);
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Home Assistant");
+    expect(screen.queryByRole("switch", { name: /health alert notifications/i })).not.toBeInTheDocument();
   });
 
   it("hides Send test button when HA is not configured", async () => {

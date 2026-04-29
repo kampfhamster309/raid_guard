@@ -61,6 +61,7 @@ export interface RuleCategory {
 export interface HaSettings {
   enabled: boolean;
   configured: boolean;
+  health_alerts_enabled: boolean;
 }
 
 export interface LlmSettings {

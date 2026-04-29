@@ -15,6 +15,7 @@ from .channels import ALERTS_ENRICHED, get_redis_url
 from .correlator import run_correlator
 from .digestor import run_digestor
 from .enricher import run_enricher
+from .health_watcher import run_health_watcher
 from .ingestor import ingestor_loop
 from .noisetuner import run_noisetuner
 from .notification_router import run_notification_router
@@ -80,6 +81,7 @@ async def lifespan(app: FastAPI):
         if b is not None
     ]
     notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
+    health_watcher_task = asyncio.create_task(run_health_watcher(pool, redis_client, app.state))
 
     try:
         yield
@@ -90,9 +92,10 @@ async def lifespan(app: FastAPI):
         digestor_task.cancel()
         noisetuner_task.cancel()
         notif_task.cancel()
+        health_watcher_task.cancel()
         await asyncio.gather(
             ingestor_task, enrich_task, correlator_task, digestor_task,
-            noisetuner_task, notif_task,
+            noisetuner_task, notif_task, health_watcher_task,
             return_exceptions=True,
         )
         await redis_client.aclose()

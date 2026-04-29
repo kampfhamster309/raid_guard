@@ -210,6 +210,7 @@ async def test_get_ha_settings_default_enabled(monkeypatch):
     data = resp.json()
     assert data["enabled"] is True
     assert data["configured"] is True
+    assert data["health_alerts_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -248,9 +249,32 @@ async def test_put_ha_settings_persists_disabled(monkeypatch):
     app.dependency_overrides = {}
     assert resp.status_code == 200
     assert resp.json()["enabled"] is False
+    # Only one execute call — health_alerts_enabled was not sent
     conn.execute.assert_awaited_once()
     _, key, value = conn.execute.call_args[0]
     assert key == "ha_enabled"
+    assert value == "false"
+
+
+@pytest.mark.asyncio
+async def test_put_ha_settings_persists_health_alerts_disabled(monkeypatch):
+    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
+    pool, conn = _make_pool()
+    from app.dependencies import get_pool
+    from app.auth import require_admin, require_auth
+    app.dependency_overrides[get_pool] = lambda: pool
+    app.dependency_overrides[require_auth] = lambda: "admin"
+    app.dependency_overrides[require_admin] = lambda: "admin"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.put("/api/settings/ha", json={"health_alerts_enabled": False})
+
+    app.dependency_overrides = {}
+    assert resp.status_code == 200
+    assert resp.json()["health_alerts_enabled"] is False
+    conn.execute.assert_awaited_once()
+    _, key, value = conn.execute.call_args[0]
+    assert key == "ha_health_alerts_enabled"
     assert value == "false"
 
 

@@ -79,19 +79,26 @@ async def set_push_threshold(
 # ── Home Assistant ────────────────────────────────────────────────────────────
 
 _HA_ENABLED_KEY = "ha_enabled"
+_HA_HEALTH_ALERTS_KEY = "ha_health_alerts_enabled"
 
 
 class HaSettingsResponse(BaseModel):
     enabled: bool
     configured: bool  # True when HA_WEBHOOK_URL env var is set
+    health_alerts_enabled: bool
 
 
 class HaSettingsRequest(BaseModel):
-    enabled: bool
+    enabled: bool | None = None
+    health_alerts_enabled: bool | None = None
 
 
 def _ha_configured() -> bool:
     return bool(os.environ.get("HA_WEBHOOK_URL", "").strip())
+
+
+def _row_to_bool(row, default: bool = True) -> bool:
+    return row["value"].lower() != "false" if row else default
 
 
 @router.get("/ha", response_model=HaSettingsResponse)
@@ -101,11 +108,17 @@ async def get_ha_settings(
 ):
     """Return current HA integration state."""
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
+        ha_row = await conn.fetchrow(
             "SELECT value FROM config WHERE key = $1", _HA_ENABLED_KEY
         )
-    enabled = row["value"].lower() != "false" if row else True
-    return HaSettingsResponse(enabled=enabled, configured=_ha_configured())
+        health_row = await conn.fetchrow(
+            "SELECT value FROM config WHERE key = $1", _HA_HEALTH_ALERTS_KEY
+        )
+    return HaSettingsResponse(
+        enabled=_row_to_bool(ha_row),
+        configured=_ha_configured(),
+        health_alerts_enabled=_row_to_bool(health_row),
+    )
 
 
 @router.put("/ha", response_model=HaSettingsResponse)
@@ -114,15 +127,37 @@ async def set_ha_settings(
     pool=Depends(get_pool),
     _=Depends(require_admin),
 ):
-    """Enable or disable HA push notifications at runtime."""
+    """Enable or disable HA push notifications at runtime. Both fields are optional."""
     async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO config(key, value) VALUES($1, $2) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
-            _HA_ENABLED_KEY,
-            str(body.enabled).lower(),
+        if body.enabled is not None:
+            await conn.execute(
+                "INSERT INTO config(key, value) VALUES($1, $2) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                _HA_ENABLED_KEY,
+                str(body.enabled).lower(),
+            )
+        if body.health_alerts_enabled is not None:
+            await conn.execute(
+                "INSERT INTO config(key, value) VALUES($1, $2) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                _HA_HEALTH_ALERTS_KEY,
+                str(body.health_alerts_enabled).lower(),
+            )
+        ha_row = await conn.fetchrow(
+            "SELECT value FROM config WHERE key = $1", _HA_ENABLED_KEY
         )
-    return HaSettingsResponse(enabled=body.enabled, configured=_ha_configured())
+        health_row = await conn.fetchrow(
+            "SELECT value FROM config WHERE key = $1", _HA_HEALTH_ALERTS_KEY
+        )
+    # Use the sent value when provided so the response reflects the write
+    # even if the test/mock doesn't persist it.
+    final_enabled = body.enabled if body.enabled is not None else _row_to_bool(ha_row)
+    final_health = body.health_alerts_enabled if body.health_alerts_enabled is not None else _row_to_bool(health_row)
+    return HaSettingsResponse(
+        enabled=final_enabled,
+        configured=_ha_configured(),
+        health_alerts_enabled=final_health,
+    )
 
 
 @router.post("/ha/test", status_code=200)
