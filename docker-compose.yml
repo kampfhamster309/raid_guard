@@ -45,7 +45,7 @@ services:
       capture-agent:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "grep -q suricata /proc/1/comm"]
+      test: ["CMD-SHELL", "grep -qx suricata /proc/*/comm 2>/dev/null"]
       interval: 30s
       timeout: 5s
       retries: 3

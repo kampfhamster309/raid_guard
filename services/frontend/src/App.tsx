@@ -17,33 +17,43 @@ import type { Alert, Severity, User } from "./types";
 type SeverityFilter = Severity | "all";
 type Page = "alerts" | "dashboard" | "status" | "incidents" | "digests" | "blocklist" | "config";
 
-const TABS: { id: Page; label: string }[] = [
+const IDS_TABS: { id: Page; label: string }[] = [
   { id: "alerts", label: "Alerts" },
   { id: "dashboard", label: "Dashboard" },
-  { id: "status", label: "Status" },
   { id: "incidents", label: "Incidents" },
   { id: "digests", label: "Digests" },
   { id: "blocklist", label: "Blocklist" },
+];
+
+const SERVICE_TABS: { id: Page; label: string }[] = [
+  { id: "status", label: "Status" },
   { id: "config", label: "Config" },
 ];
 
 function NavTabs({ page, onChange }: { page: Page; onChange: (p: Page) => void }) {
+  const tabClass = (id: Page) =>
+    `px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+      page === id
+        ? "border-indigo-500 text-white"
+        : "border-transparent text-slate-400 hover:text-slate-200"
+    }`;
+
   return (
     <nav className="flex border-b border-slate-700 bg-slate-800 px-4">
-      {TABS.map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => onChange(tab.id)}
-          aria-current={page === tab.id ? "page" : undefined}
-          className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-            page === tab.id
-              ? "border-indigo-500 text-white"
-              : "border-transparent text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          {tab.label}
-        </button>
-      ))}
+      <div className="flex">
+        {IDS_TABS.map((tab) => (
+          <button key={tab.id} onClick={() => onChange(tab.id)} aria-current={page === tab.id ? "page" : undefined} className={tabClass(tab.id)}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex ml-auto border-l border-slate-700">
+        {SERVICE_TABS.map((tab) => (
+          <button key={tab.id} onClick={() => onChange(tab.id)} aria-current={page === tab.id ? "page" : undefined} className={tabClass(tab.id)}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
     </nav>
   );
 }
