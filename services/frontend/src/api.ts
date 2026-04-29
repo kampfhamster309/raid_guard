@@ -1,4 +1,4 @@
-import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, TuningSuggestion, User } from "./types";
+import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -398,6 +398,12 @@ export async function changePassword(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
   });
+}
+
+export async function fetchStatus(): Promise<SystemStatus> {
+  const res = await fetch("/api/status", { headers: authHeaders() });
+  if (!res.ok) throw new Error("Failed to fetch system status");
+  return res.json() as Promise<SystemStatus>;
 }
 
 export function createAlertWebSocket(token: string): WebSocket {

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from app.capture import ensure_fifo, stream_to_fifo
 from app.fritz_auth import get_sid
@@ -77,11 +78,12 @@ app = FastAPI(title="raid_guard capture-agent", lifespan=lifespan)
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "service": "capture-agent",
-        **agent_state.to_dict(),
-    }
+    state_dict = agent_state.to_dict()
+    is_streaming = state_dict["capture_state"] == CaptureState.STREAMING.value
+    return JSONResponse(
+        {"status": "ok" if is_streaming else "degraded", "service": "capture-agent", **state_dict},
+        status_code=200 if is_streaming else 503,
+    )
 
 
 if __name__ == "__main__":

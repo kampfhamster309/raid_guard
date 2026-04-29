@@ -133,6 +133,30 @@ export interface FritzBlockedDevice {
   comment: string | null;
 }
 
+export interface CaptureAgentStatus {
+  ok: boolean;
+  reachable: boolean;
+  capture_state?: string;
+  reconnect_count?: number;
+  message?: string;
+}
+
+export interface SuricataStatus {
+  ok: boolean;
+  running?: boolean;
+  health?: string;
+  message?: string;
+}
+
+export interface SystemStatus {
+  db: { ok: boolean };
+  redis: { ok: boolean };
+  ingestor: { ok: boolean };
+  enricher: { ok: boolean };
+  capture_agent: CaptureAgentStatus;
+  suricata: SuricataStatus;
+}
+
 export type TuningAction = "suppress" | "threshold-adjust" | "keep";
 export type TuningStatus = "pending" | "confirmed" | "dismissed";
 

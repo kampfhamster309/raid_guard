@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 import redis.asyncio as aioredis
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 
 from .auth import ADMIN_PASSWORD, ADMIN_USERNAME, decode_token, hash_password
 from .backends.homeassistant import HomeAssistantBackend
@@ -17,7 +18,8 @@ from .enricher import run_enricher
 from .ingestor import ingestor_loop
 from .noisetuner import run_noisetuner
 from .notification_router import run_notification_router
-from .routers import alerts, auth, digests, fritz, incidents, pihole, push, rules, settings, stats, tuning, users
+from .dependencies import get_pool, get_redis
+from .routers import alerts, auth, digests, fritz, incidents, pihole, push, rules, settings, stats, status, tuning, users
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,8 @@ async def lifespan(app: FastAPI):
 
     ingestor_task = asyncio.create_task(ingestor_loop(pool, redis_client))
     enrich_task = asyncio.create_task(run_enricher(redis_client, pool))
+    app.state.ingestor_task = ingestor_task
+    app.state.enrich_task = enrich_task
     correlator_task = asyncio.create_task(run_correlator(redis_client, pool))
     digestor_task = asyncio.create_task(run_digestor(redis_client, pool))
     noisetuner_task = asyncio.create_task(run_noisetuner(pool))
@@ -109,11 +113,47 @@ app.include_router(pihole.router)
 app.include_router(fritz.router)
 app.include_router(push.router)
 app.include_router(users.router)
+app.include_router(status.router)
 
 
 @app.get("/health")
-async def health():
-    return {"status": "ok", "service": "backend"}
+async def health(
+    pool=Depends(get_pool),
+    redis_client=Depends(get_redis),
+    request: Request = None,
+):
+    db_ok = False
+    try:
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        db_ok = True
+    except Exception:
+        pass
+
+    redis_ok = False
+    try:
+        await redis_client.ping()
+        redis_ok = True
+    except Exception:
+        pass
+
+    ingestor_task = getattr(request.app.state, "ingestor_task", None)
+    enrich_task = getattr(request.app.state, "enrich_task", None)
+    ingestor_ok = ingestor_task is not None and not ingestor_task.done()
+    enrich_ok = enrich_task is not None and not enrich_task.done()
+
+    healthy = db_ok and redis_ok and ingestor_ok and enrich_ok
+    return JSONResponse(
+        {
+            "status": "ok" if healthy else "degraded",
+            "service": "backend",
+            "db": db_ok,
+            "redis": redis_ok,
+            "ingestor": ingestor_ok,
+            "enricher": enrich_ok,
+        },
+        status_code=200 if healthy else 503,
+    )
 
 
 # ── WebSocket — live alert feed ───────────────────────────────────────────────

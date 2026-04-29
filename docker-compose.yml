@@ -22,6 +22,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   suricata:
     build: ./services/suricata
@@ -41,7 +42,14 @@ services:
       - raid_guard_net
     restart: unless-stopped
     depends_on:
-      - capture-agent
+      capture-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q suricata /proc/1/comm"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
 
   db:
     image: timescale/timescaledb:latest-pg16
@@ -89,6 +97,7 @@ services:
       DB_NAME: ${DB_NAME:-raidguard}
       REDIS_URL: redis://redis:6379
       SURICATA_CONTAINER_NAME: ${COMPOSE_PROJECT_NAME:-raid_guard}-suricata-1
+      CAPTURE_AGENT_URL: http://capture-agent:8080
       SURICATA_DISABLE_CONF: /suricata/config/disable.conf
       SURICATA_DISABLE_CONF_CONTAINER: /etc/suricata/custom/disable.conf
       HA_WEBHOOK_URL: ${HA_WEBHOOK_URL:-}
@@ -120,6 +129,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   frontend:
     build: ./services/frontend
@@ -132,12 +142,14 @@ services:
       - raid_guard_net
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 15s
 
 networks:
   raid_guard_net:

@@ -238,4 +238,5 @@ def test_write_endpoint_accepts_admin_role():
 def test_health_endpoint_needs_no_auth():
     with TestClient(app) as c:
         resp = c.get("/health")
-    assert resp.status_code == 200
+    # Health is unauthenticated — must not return 401/403 regardless of service state
+    assert resp.status_code not in (401, 403)

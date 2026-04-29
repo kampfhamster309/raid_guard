@@ -10,15 +10,17 @@ import { ConfigPage } from "./components/ConfigPage";
 import { IncidentsPage } from "./components/IncidentsPage";
 import { DigestsPage } from "./components/DigestsPage";
 import { BlocklistPage } from "./components/BlocklistPage";
+import { StatusPage } from "./components/StatusPage";
 import { useAlerts } from "./hooks/useAlerts";
 import type { Alert, Severity, User } from "./types";
 
 type SeverityFilter = Severity | "all";
-type Page = "alerts" | "dashboard" | "incidents" | "digests" | "blocklist" | "config";
+type Page = "alerts" | "dashboard" | "status" | "incidents" | "digests" | "blocklist" | "config";
 
 const TABS: { id: Page; label: string }[] = [
   { id: "alerts", label: "Alerts" },
   { id: "dashboard", label: "Dashboard" },
+  { id: "status", label: "Status" },
   { id: "incidents", label: "Incidents" },
   { id: "digests", label: "Digests" },
   { id: "blocklist", label: "Blocklist" },
@@ -113,6 +115,8 @@ function AlertsPage({
         </>
       ) : page === "dashboard" ? (
         <DashboardPage />
+      ) : page === "status" ? (
+        <StatusPage />
       ) : page === "incidents" ? (
         <IncidentsPage />
       ) : page === "digests" ? (
