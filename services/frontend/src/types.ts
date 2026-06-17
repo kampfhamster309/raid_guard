@@ -71,6 +71,11 @@ export interface LlmSettings {
   max_tokens: number;
 }
 
+export interface LlmStatus {
+  available: boolean;
+  model: string | null;
+}
+
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface Incident {

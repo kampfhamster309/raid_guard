@@ -6,6 +6,7 @@ import {
   deleteUser,
   fetchHaSettings,
   fetchLlmSettings,
+  fetchLlmStatus,
   fetchPiholeSettings,
   fetchUsers,
   fetchVapidPublicKey,
@@ -17,7 +18,7 @@ import {
   updatePiholeSettings,
 } from "../api";
 import { useRules } from "../hooks/useRules";
-import type { HaSettings, LlmSettings, PiholeSettings, User } from "../types";
+import type { HaSettings, LlmSettings, LlmStatus, PiholeSettings, User } from "../types";
 import { TuningSuggestionsSection } from "./TuningSuggestionsSection";
 
 type TestStatus = "idle" | "sending" | "success" | "error";
@@ -293,12 +294,30 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
   const [llmSaveMessage, setLlmSaveMessage] = useState<string | null>(null);
   const [llmTestStatus, setLlmTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
   const [llmTestContent, setLlmTestContent] = useState<string | null>(null);
+  const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
+  const [llmStatusLoading, setLlmStatusLoading] = useState(false);
 
   useEffect(() => {
     fetchLlmSettings()
       .then((s) => { setLlmSettings(s); setLlmDraft(s); })
       .catch(() => {});
   }, []);
+
+  const detectLlmModel = async () => {
+    setLlmStatusLoading(true);
+    setLlmStatus(null);
+    try {
+      const status = await fetchLlmStatus();
+      setLlmStatus(status);
+      if (status.available && status.model && llmDraft) {
+        setLlmDraft({ ...llmDraft, model: status.model });
+      }
+    } catch {
+      setLlmStatus({ available: false, model: null });
+    } finally {
+      setLlmStatusLoading(false);
+    }
+  };
 
   const saveLlm = async () => {
     if (!llmDraft) return;
@@ -595,7 +614,31 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="block text-xs text-slate-400 mb-1">Model name</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs text-slate-400">Model name</label>
+                      <div className="flex items-center gap-2">
+                        {llmStatus !== null && (
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              llmStatus.available
+                                ? "bg-emerald-900/50 text-emerald-300 border border-emerald-700"
+                                : "bg-red-900/50 text-red-300 border border-red-700"
+                            }`}
+                          >
+                            {llmStatus.available ? "Connected" : "Unreachable"}
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => void detectLlmModel()}
+                          disabled={llmStatusLoading || !llmSettings?.url}
+                          title={!llmSettings?.url ? "Save a URL first" : "Ping LM Studio and auto-fill the loaded model"}
+                          className="text-xs px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-300 transition-colors"
+                        >
+                          {llmStatusLoading ? "Detecting…" : "Detect"}
+                        </button>
+                      </div>
+                    </div>
                     <input
                       type="text"
                       value={llmDraft.model}
@@ -604,6 +647,9 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
                       disabled={!isAdmin}
                       className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
+                    {llmStatus?.available && llmStatus.model === null && (
+                      <p className="text-xs text-amber-400 mt-1">LM Studio reachable but no model is loaded.</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">Request timeout (seconds)</label>

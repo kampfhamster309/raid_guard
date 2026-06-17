@@ -29,6 +29,7 @@ beforeEach(() => {
   vi.mocked(api.fetchLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.updateLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.testLlm).mockResolvedValue({ content: '{"summary":"test","severity_reasoning":"ok","recommended_action":"nothing"}' });
+  vi.mocked(api.fetchLlmStatus).mockResolvedValue({ available: true, model: "gemma-4-27b" });
   vi.mocked(api.fetchTuningSuggestions).mockResolvedValue([]);
   vi.mocked(api.fetchPiholeSettings).mockResolvedValue({ url: "http://pihole:80", enabled: true, configured: true });
   vi.mocked(api.updatePiholeSettings).mockResolvedValue({ url: "http://pihole:80", enabled: true, configured: true });
@@ -176,6 +177,48 @@ describe("ConfigPage — AI Enrichment", () => {
     await screen.findByPlaceholderText(/192.168.1.x:1234/);
 
     expect(screen.getByRole("button", { name: /send test prompt/i })).toBeDisabled();
+  });
+
+  it("Detect button fills model field when server is reachable", async () => {
+    vi.mocked(api.fetchLlmStatus).mockResolvedValue({ available: true, model: "gemma-4-27b-auto" });
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /detect/i }));
+
+    await waitFor(() => {
+      expect(api.fetchLlmStatus).toHaveBeenCalled();
+    });
+    await screen.findByText("Connected");
+    expect(screen.getByPlaceholderText("gemma-4-27b")).toHaveValue("gemma-4-27b-auto");
+  });
+
+  it("Detect button shows Unreachable badge when server is down", async () => {
+    vi.mocked(api.fetchLlmStatus).mockResolvedValue({ available: false, model: null });
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /detect/i }));
+
+    await screen.findByText("Unreachable");
+  });
+
+  it("Detect button shows warning when server reachable but no model loaded", async () => {
+    vi.mocked(api.fetchLlmStatus).mockResolvedValue({ available: true, model: null });
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    fireEvent.click(screen.getByRole("button", { name: /detect/i }));
+
+    await screen.findByText(/no model is loaded/i);
+  });
+
+  it("Detect button is disabled when no URL is saved", async () => {
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 });
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByPlaceholderText(/192.168.1.x:1234/);
+
+    expect(screen.getByRole("button", { name: /detect/i })).toBeDisabled();
   });
 });
 

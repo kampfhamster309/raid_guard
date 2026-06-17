@@ -1,4 +1,4 @@
-import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
+import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, LlmStatus, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -167,6 +167,11 @@ export async function updateLlmSettings(settings: LlmSettings): Promise<LlmSetti
 export async function testLlm(): Promise<{ content: string }> {
   const res = await authFetch("/api/settings/llm/test", { method: "POST" });
   return res.json() as Promise<{ content: string }>;
+}
+
+export async function fetchLlmStatus(): Promise<LlmStatus> {
+  const res = await authFetch("/api/settings/llm/status");
+  return res.json() as Promise<LlmStatus>;
 }
 
 // ── Incidents API ─────────────────────────────────────────────────────────────

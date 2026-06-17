@@ -2,6 +2,7 @@
 Unit tests for the LLM settings API (RAID-014).
 
 GET/PUT /api/settings/llm
+GET     /api/settings/llm/status
 POST    /api/settings/llm/test
 """
 
@@ -133,6 +134,85 @@ def test_set_llm_settings_rejects_max_tokens_too_high(authed_client):
     client, _ = authed_client
     resp = client.put("/api/settings/llm", json={"url": "x", "model": "y", "timeout": 90, "max_tokens": 8192})
     assert resp.status_code == 422
+
+
+# ── GET /api/settings/llm/status ─────────────────────────────────────────────
+
+
+def test_llm_status_returns_available_and_model(authed_client):
+    client, conn = authed_client
+    conn.fetch = AsyncMock(return_value=_DB_CONFIG)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"data": [{"id": "gemma-4-27b"}]}
+
+    with patch("app.routers.settings.httpx.AsyncClient") as MockClient:
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get = AsyncMock(return_value=mock_response)
+        MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = client.get("/api/settings/llm/status")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is True
+    assert data["model"] == "gemma-4-27b"
+
+
+def test_llm_status_available_no_models_loaded(authed_client):
+    client, conn = authed_client
+    conn.fetch = AsyncMock(return_value=_DB_CONFIG)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"data": []}
+
+    with patch("app.routers.settings.httpx.AsyncClient") as MockClient:
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get = AsyncMock(return_value=mock_response)
+        MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = client.get("/api/settings/llm/status")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is True
+    assert data["model"] is None
+
+
+def test_llm_status_unreachable(authed_client):
+    client, conn = authed_client
+    conn.fetch = AsyncMock(return_value=_DB_CONFIG)
+
+    with patch("app.routers.settings.httpx.AsyncClient") as MockClient:
+        mock_client_instance = AsyncMock()
+        mock_client_instance.get = AsyncMock(side_effect=Exception("Connection refused"))
+        MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        resp = client.get("/api/settings/llm/status")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is False
+    assert data["model"] is None
+
+
+def test_llm_status_not_configured(authed_client, monkeypatch):
+    client, conn = authed_client
+    conn.fetch = AsyncMock(return_value=[])
+    for key in ("LM_STUDIO_URL", "LM_STUDIO_MODEL", "LM_ENRICHMENT_TIMEOUT", "LM_MAX_TOKENS"):
+        monkeypatch.delenv(key, raising=False)
+
+    resp = client.get("/api/settings/llm/status")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is False
+    assert data["model"] is None
 
 
 # ── POST /api/settings/llm/test ───────────────────────────────────────────────

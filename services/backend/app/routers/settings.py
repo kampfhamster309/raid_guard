@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from openai import AsyncOpenAI
 from pydantic import BaseModel
@@ -260,6 +261,33 @@ async def set_llm_settings(
         timeout=body.timeout,
         max_tokens=body.max_tokens,
     )
+
+
+class LlmStatusResponse(BaseModel):
+    available: bool
+    model: str | None = None
+
+
+@router.get("/llm/status", response_model=LlmStatusResponse)
+async def get_llm_status(
+    pool=Depends(get_pool),
+    _=Depends(require_auth),
+):
+    """Ping the LM Studio server and return availability + the first loaded model name."""
+    cfg = await get_llm_config(pool)
+    url = cfg.get("url", "").strip()
+    if not url:
+        return LlmStatusResponse(available=False)
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(f"{url}/models")
+        if resp.status_code == 200:
+            data = resp.json().get("data", [])
+            model: str | None = data[0]["id"] if data else None
+            return LlmStatusResponse(available=True, model=model)
+    except Exception:
+        pass
+    return LlmStatusResponse(available=False)
 
 
 class LlmTestResponse(BaseModel):
