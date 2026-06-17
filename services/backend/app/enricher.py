@@ -202,28 +202,13 @@ async def run_enricher(redis_client, pool) -> None:
     """
     Long-running coroutine — call via ``asyncio.create_task()``.
 
-    Reads ``LM_STUDIO_URL``, ``LM_STUDIO_MODEL``, and
-    ``LM_ENRICHMENT_TIMEOUT`` from environment variables.  Falls back to
-    transparent passthrough if the LLM is not configured.
+    Re-reads LLM config from the DB on every alert so URL/model/timeout
+    changes made via the settings API take effect immediately without a
+    backend restart.  The AsyncOpenAI client is cached and only rebuilt
+    when the base URL changes.
     """
-    cfg = await get_llm_config(pool)
-    lm_url = cfg["url"]
-    model = cfg["model"]
-    timeout = float(cfg["timeout"])
-    max_tokens = int(cfg["max_tokens"])
-
+    _cached_url: str = ""
     client: AsyncOpenAI | None = None
-    if lm_url and model:
-        client = AsyncOpenAI(base_url=lm_url, api_key="lm-studio")
-        logger.info(
-            "AI enricher started — model=%s, timeout=%.0fs, max_tokens=%d",
-            model, timeout, max_tokens,
-        )
-    else:
-        logger.info(
-            "AI enricher: LM_STUDIO_URL/LM_STUDIO_MODEL not set; "
-            "forwarding alerts:raw → alerts:enriched unchanged."
-        )
 
     pubsub = redis_client.pubsub()
     await pubsub.subscribe(ALERTS_RAW)
@@ -239,7 +224,22 @@ async def run_enricher(redis_client, pool) -> None:
                 logger.warning("Enricher: invalid message payload: %s", exc)
                 continue
 
-            if client is not None:
+            # Re-read config each alert — cheap single-row DB query
+            cfg = await get_llm_config(pool)
+            lm_url = cfg["url"]
+            model = cfg["model"]
+            timeout = float(cfg["timeout"])
+            max_tokens = int(cfg["max_tokens"])
+
+            if lm_url != _cached_url:
+                client = AsyncOpenAI(base_url=lm_url, api_key="lm-studio") if lm_url else None
+                if lm_url:
+                    logger.info("AI enricher: LM Studio URL changed → %s", lm_url)
+                else:
+                    logger.info("AI enricher: LM Studio URL cleared — passthrough mode")
+                _cached_url = lm_url
+
+            if client is not None and model:
                 # Serialised: await fully before processing the next message
                 await _enrich_one(client, redis_client, pool, alert, model, timeout, max_tokens)
             else:

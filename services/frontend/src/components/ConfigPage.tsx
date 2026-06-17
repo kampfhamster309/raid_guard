@@ -328,7 +328,7 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
       setLlmSettings(updated);
       setLlmDraft(updated);
       setLlmSaveStatus("success");
-      setLlmSaveMessage("Settings saved. Restart the backend container for the enricher to pick up the new config.");
+      setLlmSaveMessage("Settings saved.");
     } catch (e) {
       setLlmSaveStatus("error");
       setLlmSaveMessage(e instanceof Error ? e.message : "Save failed");
@@ -592,7 +592,7 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
           <div className="mb-4">
             <h2 className="text-lg font-semibold text-slate-100">AI Enrichment</h2>
             <p className="text-sm text-slate-400 mt-0.5">
-              LM Studio connection settings for per-alert AI analysis. Save changes, then restart the backend container for the enricher to use the new config.
+              LM Studio connection settings for per-alert AI analysis. Changes take effect immediately after saving.
             </p>
           </div>
 

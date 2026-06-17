@@ -282,3 +282,44 @@ async def test_run_enricher_skips_invalid_json(monkeypatch):
     pool, _ = _make_pool()
     await run_enricher(redis, pool)
     redis.publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_enricher_picks_up_url_change_without_restart():
+    """Config is re-read per alert; switching URL mid-stream recreates the client."""
+    alert1 = dict(_SAMPLE_ALERT, id=str(uuid.uuid4()))
+    alert2 = dict(_SAMPLE_ALERT, id=str(uuid.uuid4()))
+
+    url_sequence = ["http://old-host:1234/v1", "http://new-host:1234/v1"]
+    call_index = 0
+
+    async def _get_llm_config_side_effect(pool):
+        nonlocal call_index
+        url = url_sequence[min(call_index, len(url_sequence) - 1)]
+        call_index += 1
+        return {"url": url, "model": "gemma-4-27b", "timeout": "90", "max_tokens": "512"}
+
+    redis = MagicMock()
+    pubsub = MagicMock()
+    pubsub.subscribe = AsyncMock()
+    pubsub.listen = lambda: _make_pubsub_messages([alert1, alert2])
+    pubsub.unsubscribe = AsyncMock()
+    redis.pubsub = MagicMock(return_value=pubsub)
+    redis.publish = AsyncMock()
+
+    pool, conn = _make_pool()
+    conn.execute = AsyncMock()
+
+    with patch("app.enricher.get_llm_config", side_effect=_get_llm_config_side_effect), \
+         patch("app.enricher.AsyncOpenAI") as MockOpenAI:
+        mock_client = AsyncMock()
+        mock_client.chat.completions.create = AsyncMock(
+            return_value=_make_openai_response(json.dumps(_GOOD_ENRICHMENT))
+        )
+        MockOpenAI.return_value = mock_client
+        await run_enricher(redis, pool)
+
+    # AsyncOpenAI should have been constructed twice — once per distinct URL
+    assert MockOpenAI.call_count == 2
+    assert MockOpenAI.call_args_list[0][1]["base_url"] == "http://old-host:1234/v1"
+    assert MockOpenAI.call_args_list[1][1]["base_url"] == "http://new-host:1234/v1"
