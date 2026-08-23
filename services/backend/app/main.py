@@ -9,6 +9,7 @@ from fastapi import Depends, FastAPI, Query, Request, WebSocket, WebSocketDiscon
 from fastapi.responses import JSONResponse
 
 from .auth import ADMIN_PASSWORD, ADMIN_USERNAME, decode_token, hash_password
+from .backends.gotify import GotifyBackend
 from .backends.homeassistant import HomeAssistantBackend
 from .backends.webpush import WebPushBackend
 from .channels import ALERTS_ENRICHED, get_redis_url
@@ -76,12 +77,13 @@ async def lifespan(app: FastAPI):
     backends = [
         b for b in [
             HomeAssistantBackend.from_env(pool),
+            GotifyBackend.from_env(pool),
             WebPushBackend.from_env(pool),
         ]
         if b is not None
     ]
     notif_task = asyncio.create_task(run_notification_router(redis_client, pool, backends))
-    health_watcher_task = asyncio.create_task(run_health_watcher(pool, redis_client, app.state))
+    health_watcher_task = asyncio.create_task(run_health_watcher(pool, redis_client, app.state, backends))
 
     try:
         yield

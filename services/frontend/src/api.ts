@@ -1,4 +1,4 @@
-import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, HaSettings, Incident, IncidentDetail, LlmSettings, LlmStatus, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
+import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, GotifySettings, HaSettings, Incident, IncidentDetail, LlmSettings, LlmStatus, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -146,6 +146,28 @@ export async function updateHaSettings(
 
 export async function testHaSend(): Promise<void> {
   await authFetch("/api/settings/ha/test", { method: "POST" });
+}
+
+// ── Gotify API ─────────────────────────────────────────────────────────────────
+
+export async function fetchGotifySettings(): Promise<GotifySettings> {
+  const res = await authFetch("/api/settings/gotify");
+  return res.json() as Promise<GotifySettings>;
+}
+
+export async function updateGotifySettings(
+  params: { enabled?: boolean; health_alerts_enabled?: boolean }
+): Promise<GotifySettings> {
+  const res = await authFetch("/api/settings/gotify", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  return res.json() as Promise<GotifySettings>;
+}
+
+export async function testGotifySend(): Promise<void> {
+  await authFetch("/api/settings/gotify/test", { method: "POST" });
 }
 
 // ── LLM settings API ──────────────────────────────────────────────────────────

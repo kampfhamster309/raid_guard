@@ -1,17 +1,17 @@
 # raid_guard
 
 > **Work in progress.** Capture, detection, ingestion, API, dashboard, rule
-> configuration, Home Assistant push notifications, AI alert enrichment,
-> AI batch incident correlation, periodic security digests, AI-driven noise
-> tuning with live Suricata threshold application, Pi-hole DNS sinkholing,
-> Fritzbox device quarantine, and PWA with Web Push notifications are
-> functional (RAID-001 through RAID-021).
+> configuration, Home Assistant + Gotify push notifications, AI alert
+> enrichment, AI batch incident correlation, periodic security digests,
+> AI-driven noise tuning with live Suricata threshold application, Pi-hole
+> DNS sinkholing, Fritzbox device quarantine, and PWA with Web Push
+> notifications are functional (RAID-001 through RAID-021).
 > See `development_plan.md` for the full roadmap.
 
 Network intrusion detection system for Unraid, powered by Suricata and an
 on-premises LLM. Traffic is captured from an AVM Fritzbox router, analysed
-in real-time, and surfaced via a web dashboard with Home Assistant push
-notifications.
+in real-time, and surfaced via a web dashboard with Home Assistant and
+Gotify push notifications.
 
 ---
 
@@ -29,6 +29,7 @@ Fritzbox → capture-agent → FIFO (/pcap/) → Suricata (IDS only)
                                   React frontend      Notification router
                                   (PWA, port 3000)         ↓
                                                     Home Assistant (push)
+                                                    Gotify (push)
                                                     Pi-hole v6 (sinkhole)
 ```
 
@@ -145,6 +146,9 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/settings/ha` | Get HA integration state (`{"enabled": bool, "configured": bool}`) |
 | `PUT` | `/api/settings/ha` | Enable or disable HA push notifications (body: `{"enabled": bool}`) |
 | `POST` | `/api/settings/ha/test` | Send a synthetic test notification to the configured HA webhook |
+| `GET` | `/api/settings/gotify` | Get Gotify integration state (`{"enabled": bool, "configured": bool}`) |
+| `PUT` | `/api/settings/gotify` | Enable or disable Gotify push notifications (body: `{"enabled": bool}`) |
+| `POST` | `/api/settings/gotify/test` | Send a synthetic test notification to the configured Gotify server |
 | `GET` | `/api/settings/llm` | Get LM Studio configuration (URL, model, timeout, max tokens) |
 | `PUT` | `/api/settings/llm` | Persist LM Studio configuration to the config table |
 | `POST` | `/api/settings/llm/test` | Send a synthetic alert to the LLM and return the raw response |
@@ -175,8 +179,8 @@ Full interactive docs at `/docs` (Swagger UI) and `/redoc`.
 | `suricata` | ✅ | Reads PCAP from FIFO, runs ET Open rules, outputs EVE JSON |
 | `db` | ✅ | TimescaleDB — hypertable schema with 90-day retention and 7-day compression |
 | `redis` | ✅ | Pub/sub event bus (`alerts:raw`, `alerts:enriched`, `incidents:new`, `digests:new`) |
-| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher (bulk + on-demand), batch correlator, periodic digest worker, noise tuner with live Suricata threshold/suppress apply, rule management, notification router (HA push + Web Push), Pi-hole sinkhole client, Fritzbox TR-064 quarantine |
-| `frontend` | ✅ | React PWA — live alert feed, on-demand AI re-analysis, per-severity stacked bar chart, incidents view, digests view, unified blocklist (Pi-hole + Fritzbox), rule config, LLM + HA + Web Push settings, tuning suggestions with inline threshold form |
+| `backend` | ✅ | FastAPI: REST API, WebSocket, EVE JSON ingestor, AI enricher (bulk + on-demand), batch correlator, periodic digest worker, noise tuner with live Suricata threshold/suppress apply, rule management, notification router (HA + Gotify push + Web Push), Pi-hole sinkhole client, Fritzbox TR-064 quarantine |
+| `frontend` | ✅ | React PWA — live alert feed, on-demand AI re-analysis, per-severity stacked bar chart, incidents view, digests view, unified blocklist (Pi-hole + Fritzbox), rule config, LLM + HA + Gotify + Web Push settings, tuning suggestions with inline threshold form |
 
 ---
 
@@ -226,6 +230,9 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `PIHOLE_HOST` / `PIHOLE_PASSWORD` | — | Pi-hole v6 address and API password |
 | `HA_WEBHOOK_URL` | — | Home Assistant webhook URL for IDS alert notifications (leave unset to disable HA push) |
 | `HA_HEALTH_WEBHOOK_URL` | — | Separate webhook for pipeline health alerts; falls back to `HA_WEBHOOK_URL` if not set |
+| `GOTIFY_URL` | — | Base URL of a self-hosted Gotify server |
+| `GOTIFY_APP_TOKEN` | — | Gotify application token for IDS alert notifications (leave unset to disable Gotify push) |
+| `GOTIFY_HEALTH_APP_TOKEN` | — | Separate Gotify app token for pipeline health alerts; falls back to `GOTIFY_APP_TOKEN` if not set |
 | `DASHBOARD_URL` | — | Public URL of the raid_guard dashboard — used to generate deep links in push notifications (e.g. `http://unraid:3000`) |
 | `VAPID_PRIVATE_KEY` | — | VAPID private key (base64url) — generate with `py_vapid` (see `.env.example`) |
 | `VAPID_PUBLIC_KEY` | — | VAPID public key (base64url) — served to browsers for push subscription |
@@ -350,14 +357,71 @@ action:
 
 ---
 
+## Gotify integration
+
+raid_guard can also push alert notifications to a self-hosted
+[Gotify](https://gotify.net) server — a lightweight alternative (or
+complement) to Home Assistant if you don't want to model IDS alerts as HA
+automations.
+
+### 1 — Create an application in Gotify
+
+In the Gotify web UI, go to **Apps → Create Application**, give it a name
+(e.g. `raid_guard`), and copy the generated application token.
+
+### 2 — Configure raid_guard
+
+Set the following in your `.env`:
+
+```bash
+GOTIFY_URL=http://<gotify-host>:8080
+GOTIFY_APP_TOKEN=<application token>
+DASHBOARD_URL=http://<unraid-host>:3000
+```
+
+Rebuild and redeploy the backend, or just restart the backend container:
+
+```bash
+docker compose restart backend
+```
+
+### 3 — Set push threshold and verify
+
+In the raid_guard dashboard, go to **Config → Notifications**:
+
+- Use the toggle to enable or disable Gotify notifications at runtime (no restart needed).
+- Use **Send test** to fire a synthetic notification to Gotify immediately and confirm delivery.
+
+The push threshold (default: `warning`) is shared across every notification
+backend — Home Assistant and Gotify both respect the same severity threshold.
+
+### Message fields
+
+Each Gotify message contains:
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| `title` | `raid_guard — WARNING` | Notification title |
+| `message` | `Port scan detected from 192.168.1.5` | AI summary (if enriched) or signature + src IP |
+| `priority` | `5` | Mapped from severity: `info`=2, `warning`=5, `critical`=8 |
+| `extras.client::notification.click.url` | `http://unraid:3000?alert=a1b2c3d4-…` | Deep link to the alert drawer (only set when `DASHBOARD_URL` is configured) |
+
+---
+
 ## Health alert notifications
 
 raid_guard can also notify you when a **pipeline component** becomes unhealthy
 or recovers (DB, Redis, Fritzbox Capture, Suricata, Alert Ingestor, AI Enricher).
-These events have a different payload shape from alert notifications and require
-a **separate webhook** so you can route them independently.
+Every configured notification backend (Home Assistant, Gotify) receives these
+events independently, each gated by its own **Health Alerts** toggle in
+**Config → Notifications**.
 
-### Payload reference
+### Home Assistant
+
+These events have a different payload shape from alert notifications and
+benefit from a **separate webhook** so you can route them independently.
+
+#### Payload reference
 
 | Field | Example | Description |
 |-------|---------|-------------|
@@ -368,7 +432,7 @@ a **separate webhook** so you can route them independently.
 | `healthy` | `false` | `true` = recovered, `false` = unhealthy |
 | `timestamp` | `2026-04-11T14:32:00+00:00` | ISO 8601 event timestamp |
 
-### HA automation example
+#### HA automation example
 
 Create a second webhook automation in HA for health events:
 
@@ -407,7 +471,26 @@ HA_HEALTH_WEBHOOK_URL=http://<ha-host>:8123/api/webhook/raid_guard_health
 > automation — but the alert automation's `tag` and `color` logic will not
 > render correctly for health events, so a dedicated webhook is recommended.
 
-Enable or disable health alerts at runtime in **Config → Notifications → Health Alerts**.
+### Gotify
+
+Health events use the same message shape as alert notifications
+(`title` / `message` / `priority`) — priority `8` for unhealthy transitions,
+`5` for recovered transitions.
+
+Optionally create a **separate Gotify application** for health events and set
+its token:
+
+```bash
+GOTIFY_HEALTH_APP_TOKEN=<separate application token>
+```
+
+> **Fallback behaviour:** If `GOTIFY_HEALTH_APP_TOKEN` is not set, health
+> alerts are sent using `GOTIFY_APP_TOKEN` instead — a single application
+> works without any extra configuration, but a dedicated one lets you mute or
+> route health pings separately from IDS alerts in the Gotify app.
+
+Enable or disable health alerts per backend at runtime in
+**Config → Notifications → Health Alerts**.
 
 ---
 

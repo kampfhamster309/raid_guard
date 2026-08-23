@@ -1,15 +1,14 @@
 """
-Unit tests for backends/homeassistant.py and the HA-related settings endpoints.
+Unit tests for backends/gotify.py and the Gotify-related settings endpoints.
 No real HTTP calls or DB connections are made.
 """
 
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from app.backends.homeassistant import HomeAssistantBackend
+from app.backends.gotify import GotifyBackend
 from app.main import app
 
 
@@ -40,58 +39,68 @@ def _mock_post_ok():
 # ── from_env ──────────────────────────────────────────────────────────────────
 
 
-def test_from_env_returns_none_when_url_not_set(monkeypatch):
-    monkeypatch.delenv("HA_WEBHOOK_URL", raising=False)
-    assert HomeAssistantBackend.from_env() is None
+def test_from_env_returns_none_when_nothing_set(monkeypatch):
+    monkeypatch.delenv("GOTIFY_URL", raising=False)
+    monkeypatch.delenv("GOTIFY_APP_TOKEN", raising=False)
+    monkeypatch.delenv("GOTIFY_HEALTH_APP_TOKEN", raising=False)
+    assert GotifyBackend.from_env() is None
 
 
-def test_from_env_returns_backend_when_url_set(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/webhook/xyz")
-    backend = HomeAssistantBackend.from_env()
+def test_from_env_returns_none_when_url_missing(monkeypatch):
+    monkeypatch.delenv("GOTIFY_URL", raising=False)
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok123")
+    assert GotifyBackend.from_env() is None
+
+
+def test_from_env_returns_none_when_no_token(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.delenv("GOTIFY_APP_TOKEN", raising=False)
+    monkeypatch.delenv("GOTIFY_HEALTH_APP_TOKEN", raising=False)
+    assert GotifyBackend.from_env() is None
+
+
+def test_from_env_returns_backend_when_url_and_token_set(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok123")
+    backend = GotifyBackend.from_env()
     assert backend is not None
-    assert backend.name == "homeassistant"
+    assert backend.name == "gotify"
 
 
-def test_from_env_ignores_whitespace_only_url(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "   ")
-    assert HomeAssistantBackend.from_env() is None
+def test_from_env_returns_backend_when_only_health_token_set(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.delenv("GOTIFY_APP_TOKEN", raising=False)
+    monkeypatch.setenv("GOTIFY_HEALTH_APP_TOKEN", "healthtok")
+    backend = GotifyBackend.from_env()
+    assert backend is not None
 
 
 def test_from_env_reads_dashboard_url(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/webhook/xyz")
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok123")
     monkeypatch.setenv("DASHBOARD_URL", "http://192.168.1.5:3000")
-    backend = HomeAssistantBackend.from_env()
+    backend = GotifyBackend.from_env()
     assert backend._dashboard_url == "http://192.168.1.5:3000"
-
-
-def test_from_env_returns_backend_when_only_health_webhook_set(monkeypatch):
-    monkeypatch.delenv("HA_WEBHOOK_URL", raising=False)
-    monkeypatch.setenv("HA_HEALTH_WEBHOOK_URL", "http://ha.local/webhook/health")
-    backend = HomeAssistantBackend.from_env()
-    assert backend is not None
-    assert backend._health_url == "http://ha.local/webhook/health"
 
 
 # ── _build_payload ────────────────────────────────────────────────────────────
 
 
 def test_build_payload_uses_signature_when_no_enrichment():
-    backend = HomeAssistantBackend("http://ha.local/wh")
+    backend = GotifyBackend("http://gotify.local", "tok")
     payload = backend._build_payload({
         "id": "abc-123",
         "severity": "critical",
         "signature": "ET MALWARE Beacon",
         "src_ip": "192.168.1.5",
-        "timestamp": "2026-04-11T10:00:00+00:00",
     })
     assert payload["message"] == "ET MALWARE Beacon from 192.168.1.5"
-    assert payload["title"] == "raid_guard \u2014 CRITICAL"
-    assert payload["alert_id"] == "abc-123"
-    assert payload["url"] == ""  # no dashboard_url set
+    assert payload["title"] == "raid_guard — CRITICAL"
+    assert payload["priority"] == 8
 
 
 def test_build_payload_uses_ai_summary_when_available():
-    backend = HomeAssistantBackend("http://ha.local/wh")
+    backend = GotifyBackend("http://gotify.local", "tok")
     payload = backend._build_payload({
         "id": "abc-123",
         "severity": "warning",
@@ -100,18 +109,25 @@ def test_build_payload_uses_ai_summary_when_available():
         "enrichment": {"summary": "Port scan detected on subnet"},
     })
     assert "Port scan detected" in payload["message"]
+    assert payload["priority"] == 5
 
 
-def test_build_payload_includes_deep_link():
-    backend = HomeAssistantBackend("http://ha.local/wh", dashboard_url="http://192.168.1.5:3000")
+def test_build_payload_defaults_priority_for_info():
+    backend = GotifyBackend("http://gotify.local", "tok")
+    payload = backend._build_payload({"id": "x", "severity": "info"})
+    assert payload["priority"] == 2
+
+
+def test_build_payload_includes_click_extra_when_dashboard_url_set():
+    backend = GotifyBackend("http://gotify.local", "tok", dashboard_url="http://192.168.1.5:3000")
     payload = backend._build_payload({"id": "uuid-001", "severity": "info"})
-    assert payload["url"] == "http://192.168.1.5:3000?alert=uuid-001"
+    assert payload["extras"]["client::notification"]["click"]["url"] == "http://192.168.1.5:3000?alert=uuid-001"
 
 
-def test_build_payload_no_url_when_dashboard_url_empty():
-    backend = HomeAssistantBackend("http://ha.local/wh", dashboard_url="")
+def test_build_payload_no_extras_when_dashboard_url_empty():
+    backend = GotifyBackend("http://gotify.local", "tok", dashboard_url="")
     payload = backend._build_payload({"id": "uuid-001", "severity": "info"})
-    assert payload["url"] == ""
+    assert "extras" not in payload
 
 
 # ── _is_enabled ───────────────────────────────────────────────────────────────
@@ -119,21 +135,14 @@ def test_build_payload_no_url_when_dashboard_url_empty():
 
 @pytest.mark.asyncio
 async def test_is_enabled_true_when_no_pool():
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=None)
-    assert await backend._is_enabled() is True
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_true_when_no_config_row():
-    pool, _ = _make_pool(fetchrow_return=None)
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=None)
     assert await backend._is_enabled() is True
 
 
 @pytest.mark.asyncio
 async def test_is_enabled_false_when_config_says_false():
     pool, _ = _make_pool(fetchrow_return={"value": "false"})
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     assert await backend._is_enabled() is False
 
 
@@ -141,7 +150,7 @@ async def test_is_enabled_false_when_config_says_false():
 async def test_is_enabled_true_when_db_raises():
     pool = MagicMock()
     pool.acquire.side_effect = Exception("DB down")
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     assert await backend._is_enabled() is True
 
 
@@ -151,19 +160,31 @@ async def test_is_enabled_true_when_db_raises():
 @pytest.mark.asyncio
 async def test_send_posts_when_enabled():
     pool, _ = _make_pool(fetchrow_return=None)  # no row → enabled
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send({"id": "x", "severity": "warning", "src_ip": "1.2.3.4"})
     mock_client.post.assert_awaited_once()
+    call = mock_client.post.call_args
+    assert call.args[0] == "http://gotify.local/message"
+    assert call.kwargs["params"] == {"token": "tok"}
 
 
 @pytest.mark.asyncio
 async def test_send_skips_when_disabled():
     pool, _ = _make_pool(fetchrow_return={"value": "false"})
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
+        await backend.send({"id": "x", "severity": "critical"})
+    mock_client.post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_skips_when_no_token():
+    backend = GotifyBackend("http://gotify.local", "")
+    mock_client = _mock_post_ok()
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send({"id": "x", "severity": "critical"})
     mock_client.post.assert_not_awaited()
 
@@ -171,14 +192,14 @@ async def test_send_skips_when_disabled():
 @pytest.mark.asyncio
 async def test_send_raises_on_http_error():
     pool, _ = _make_pool(fetchrow_return=None)
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     mock_response = MagicMock()
     mock_response.raise_for_status = MagicMock(side_effect=Exception("HTTP 500"))
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.post = AsyncMock(return_value=mock_response)
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         with pytest.raises(Exception, match="HTTP 500"):
             await backend.send({"id": "x", "severity": "critical"})
 
@@ -189,10 +210,10 @@ async def test_send_raises_on_http_error():
 @pytest.mark.asyncio
 async def test_send_test_always_posts():
     """send_test() bypasses the enabled flag and always sends."""
-    pool, _ = _make_pool(fetchrow_return={"value": "false"})  # HA is disabled
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
+    pool, _ = _make_pool(fetchrow_return={"value": "false"})  # gotify is disabled
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send_test()
     mock_client.post.assert_awaited_once()
 
@@ -201,38 +222,35 @@ async def test_send_test_always_posts():
 
 
 @pytest.mark.asyncio
-async def test_send_health_alert_posts_to_health_url():
+async def test_send_health_alert_posts_with_health_token():
     pool, _ = _make_pool(fetchrow_return=None)
-    backend = HomeAssistantBackend(
-        "http://ha.local/alerts", pool=pool, health_webhook_url="http://ha.local/health"
-    )
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool, health_app_token="healthtok")
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send_health_alert("db", "TimescaleDB", False)
     call = mock_client.post.call_args
-    assert call.args[0] == "http://ha.local/health"
+    assert call.kwargs["params"] == {"token": "healthtok"}
     payload = call.kwargs["json"]
-    assert payload["healthy"] is False
+    assert payload["priority"] == 8
     assert "TimescaleDB" in payload["message"]
 
 
 @pytest.mark.asyncio
-async def test_send_health_alert_falls_back_to_main_url():
-    pool, _ = _make_pool(fetchrow_return=None)
-    backend = HomeAssistantBackend("http://ha.local/alerts", pool=pool)
+async def test_send_health_alert_falls_back_to_main_token():
+    backend = GotifyBackend("http://gotify.local", "tok")
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send_health_alert("redis", "Redis", True)
     call = mock_client.post.call_args
-    assert call.args[0] == "http://ha.local/alerts"
-    assert "Recovered" in call.kwargs["json"]["title"]
+    assert call.kwargs["params"] == {"token": "tok"}
+    assert call.kwargs["json"]["priority"] == 5
 
 
 @pytest.mark.asyncio
-async def test_send_health_alert_skips_when_no_url():
-    backend = HomeAssistantBackend("")
+async def test_send_health_alert_skips_when_no_token():
+    backend = GotifyBackend("http://gotify.local", "")
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send_health_alert("db", "TimescaleDB", False)
     mock_client.post.assert_not_awaited()
 
@@ -240,9 +258,9 @@ async def test_send_health_alert_skips_when_no_url():
 @pytest.mark.asyncio
 async def test_send_health_alert_skips_when_disabled():
     pool, _ = _make_pool(fetchrow_return={"value": "false"})
-    backend = HomeAssistantBackend("http://ha.local/alerts", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send_health_alert("db", "TimescaleDB", False)
     mock_client.post.assert_not_awaited()
 
@@ -250,30 +268,22 @@ async def test_send_health_alert_skips_when_disabled():
 @pytest.mark.asyncio
 async def test_send_health_alert_swallows_http_error():
     pool, _ = _make_pool(fetchrow_return=None)
-    backend = HomeAssistantBackend("http://ha.local/alerts", pool=pool)
+    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
     mock_client = AsyncMock()
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.post = AsyncMock(side_effect=Exception("Connection refused"))
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         await backend.send_health_alert("db", "TimescaleDB", False)  # no exception raised
 
 
-@pytest.mark.asyncio
-async def test_send_skips_when_no_url():
-    backend = HomeAssistantBackend("")
-    mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
-        await backend.send({"id": "x", "severity": "critical"})
-    mock_client.post.assert_not_awaited()
-
-
-# ── GET /api/settings/ha ──────────────────────────────────────────────────────
+# ── GET /api/settings/gotify ──────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_get_ha_settings_default_enabled(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
+async def test_get_gotify_settings_default_enabled(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok")
     pool, _ = _make_pool(fetchrow_return=None)
     from app.dependencies import get_pool
     from app.auth import require_admin, require_auth
@@ -282,7 +292,7 @@ async def test_get_ha_settings_default_enabled(monkeypatch):
     app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/api/settings/ha")
+        resp = await client.get("/api/settings/gotify")
 
     app.dependency_overrides = {}
     assert resp.status_code == 200
@@ -293,8 +303,9 @@ async def test_get_ha_settings_default_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_ha_settings_not_configured(monkeypatch):
-    monkeypatch.delenv("HA_WEBHOOK_URL", raising=False)
+async def test_get_gotify_settings_not_configured(monkeypatch):
+    monkeypatch.delenv("GOTIFY_URL", raising=False)
+    monkeypatch.delenv("GOTIFY_APP_TOKEN", raising=False)
     pool, _ = _make_pool(fetchrow_return=None)
     from app.dependencies import get_pool
     from app.auth import require_admin, require_auth
@@ -303,18 +314,19 @@ async def test_get_ha_settings_not_configured(monkeypatch):
     app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.get("/api/settings/ha")
+        resp = await client.get("/api/settings/gotify")
 
     app.dependency_overrides = {}
     assert resp.json()["configured"] is False
 
 
-# ── PUT /api/settings/ha ──────────────────────────────────────────────────────
+# ── PUT /api/settings/gotify ───────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_put_ha_settings_persists_disabled(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
+async def test_put_gotify_settings_persists_disabled(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok")
     pool, conn = _make_pool()
     from app.dependencies import get_pool
     from app.auth import require_admin, require_auth
@@ -323,21 +335,21 @@ async def test_put_ha_settings_persists_disabled(monkeypatch):
     app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.put("/api/settings/ha", json={"enabled": False})
+        resp = await client.put("/api/settings/gotify", json={"enabled": False})
 
     app.dependency_overrides = {}
     assert resp.status_code == 200
     assert resp.json()["enabled"] is False
-    # Only one execute call — health_alerts_enabled was not sent
     conn.execute.assert_awaited_once()
     _, key, value = conn.execute.call_args[0]
-    assert key == "ha_enabled"
+    assert key == "gotify_enabled"
     assert value == "false"
 
 
 @pytest.mark.asyncio
-async def test_put_ha_settings_persists_health_alerts_disabled(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
+async def test_put_gotify_settings_persists_health_alerts_disabled(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok")
     pool, conn = _make_pool()
     from app.dependencies import get_pool
     from app.auth import require_admin, require_auth
@@ -346,23 +358,24 @@ async def test_put_ha_settings_persists_health_alerts_disabled(monkeypatch):
     app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.put("/api/settings/ha", json={"health_alerts_enabled": False})
+        resp = await client.put("/api/settings/gotify", json={"health_alerts_enabled": False})
 
     app.dependency_overrides = {}
     assert resp.status_code == 200
     assert resp.json()["health_alerts_enabled"] is False
     conn.execute.assert_awaited_once()
     _, key, value = conn.execute.call_args[0]
-    assert key == "ha_health_alerts_enabled"
+    assert key == "gotify_health_alerts_enabled"
     assert value == "false"
 
 
-# ── POST /api/settings/ha/test ────────────────────────────────────────────────
+# ── POST /api/settings/gotify/test ────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_ha_test_sends_notification(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
+async def test_gotify_test_sends_notification(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok")
     monkeypatch.delenv("DASHBOARD_URL", raising=False)
     pool, _ = _make_pool()
     from app.dependencies import get_pool
@@ -372,9 +385,9 @@ async def test_ha_test_sends_notification(monkeypatch):
     app.dependency_overrides[require_admin] = lambda: "admin"
 
     mock_client = _mock_post_ok()
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post("/api/settings/ha/test")
+            resp = await client.post("/api/settings/gotify/test")
 
     app.dependency_overrides = {}
     assert resp.status_code == 200
@@ -383,8 +396,9 @@ async def test_ha_test_sends_notification(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_ha_test_returns_422_when_not_configured(monkeypatch):
-    monkeypatch.delenv("HA_WEBHOOK_URL", raising=False)
+async def test_gotify_test_returns_422_when_not_configured(monkeypatch):
+    monkeypatch.delenv("GOTIFY_URL", raising=False)
+    monkeypatch.delenv("GOTIFY_APP_TOKEN", raising=False)
     pool, _ = _make_pool()
     from app.dependencies import get_pool
     from app.auth import require_admin, require_auth
@@ -393,15 +407,16 @@ async def test_ha_test_returns_422_when_not_configured(monkeypatch):
     app.dependency_overrides[require_admin] = lambda: "admin"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        resp = await client.post("/api/settings/ha/test")
+        resp = await client.post("/api/settings/gotify/test")
 
     app.dependency_overrides = {}
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_ha_test_returns_502_on_delivery_failure(monkeypatch):
-    monkeypatch.setenv("HA_WEBHOOK_URL", "http://ha.local/wh")
+async def test_gotify_test_returns_502_on_delivery_failure(monkeypatch):
+    monkeypatch.setenv("GOTIFY_URL", "http://gotify.local")
+    monkeypatch.setenv("GOTIFY_APP_TOKEN", "tok")
     pool, _ = _make_pool()
     from app.dependencies import get_pool
     from app.auth import require_admin, require_auth
@@ -413,9 +428,9 @@ async def test_ha_test_returns_502_on_delivery_failure(monkeypatch):
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
     mock_client.post = AsyncMock(side_effect=Exception("Connection refused"))
-    with patch("app.backends.homeassistant.httpx.AsyncClient", return_value=mock_client):
+    with patch("app.backends.gotify.httpx.AsyncClient", return_value=mock_client):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            resp = await client.post("/api/settings/ha/test")
+            resp = await client.post("/api/settings/gotify/test")
 
     app.dependency_overrides = {}
     assert resp.status_code == 502

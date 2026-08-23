@@ -64,6 +64,12 @@ export interface HaSettings {
   health_alerts_enabled: boolean;
 }
 
+export interface GotifySettings {
+  enabled: boolean;
+  configured: boolean;
+  health_alerts_enabled: boolean;
+}
+
 export interface LlmSettings {
   url: string;
   model: string;

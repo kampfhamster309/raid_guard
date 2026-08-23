@@ -17,6 +17,9 @@ const CATEGORIES = [
 const HA_CONFIGURED: api.HaSettings = { enabled: true, configured: true, health_alerts_enabled: true };
 const HA_NOT_CONFIGURED: api.HaSettings = { enabled: false, configured: false, health_alerts_enabled: true };
 
+const GOTIFY_CONFIGURED: api.GotifySettings = { enabled: true, configured: true, health_alerts_enabled: true };
+const GOTIFY_NOT_CONFIGURED: api.GotifySettings = { enabled: false, configured: false, health_alerts_enabled: true };
+
 const LLM_SETTINGS = { url: "http://lmstudio:1234/v1", model: "gemma-4-27b", timeout: 90, max_tokens: 512 };
 
 beforeEach(() => {
@@ -26,6 +29,9 @@ beforeEach(() => {
   vi.mocked(api.fetchHaSettings).mockResolvedValue(HA_CONFIGURED);
   vi.mocked(api.updateHaSettings).mockResolvedValue({ enabled: false, configured: true, health_alerts_enabled: true });
   vi.mocked(api.testHaSend).mockResolvedValue(undefined);
+  vi.mocked(api.fetchGotifySettings).mockResolvedValue(GOTIFY_NOT_CONFIGURED);
+  vi.mocked(api.updateGotifySettings).mockResolvedValue({ enabled: false, configured: true, health_alerts_enabled: true });
+  vi.mocked(api.testGotifySend).mockResolvedValue(undefined);
   vi.mocked(api.fetchLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.updateLlmSettings).mockResolvedValue(LLM_SETTINGS);
   vi.mocked(api.testLlm).mockResolvedValue({ content: '{"summary":"test","severity_reasoning":"ok","recommended_action":"nothing"}' });
@@ -311,6 +317,97 @@ describe("ConfigPage — Home Assistant", () => {
     vi.mocked(api.testHaSend).mockRejectedValue(new Error("Connection refused"));
     render(<ConfigPage currentUser={ADMIN_USER} />);
     await screen.findByText("Home Assistant");
+
+    fireEvent.click(screen.getByRole("button", { name: /^send test$/i }));
+
+    await screen.findByText("Connection refused");
+  });
+});
+
+// ── Gotify ──────────────────────────────────────────────────────────────────
+
+describe("ConfigPage — Gotify", () => {
+  beforeEach(() => {
+    // Keep HA unconfigured in this block so its "Send test" button / switch
+    // don't collide with Gotify's identically-labeled controls.
+    vi.mocked(api.fetchHaSettings).mockResolvedValue(HA_NOT_CONFIGURED);
+    vi.mocked(api.fetchGotifySettings).mockResolvedValue(GOTIFY_CONFIGURED);
+  });
+
+  it("renders Gotify section with toggle and Send test button when configured", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+    expect(screen.getByRole("button", { name: /^send test$/i })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /gotify notifications/i })).toBeInTheDocument();
+  });
+
+  it("shows Gotify toggle as enabled when configured and enabled", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+    const gotifySwitch = screen.getByRole("switch", { name: /gotify notifications/i });
+    expect(gotifySwitch).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("calls updateGotifySettings when Gotify toggle is clicked", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+
+    fireEvent.click(screen.getByRole("switch", { name: /gotify notifications/i }));
+
+    await waitFor(() => {
+      expect(api.updateGotifySettings).toHaveBeenCalledWith({ enabled: false });
+    });
+  });
+
+  it("renders the health alerts sub-toggle when Gotify is configured", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+    expect(screen.getByRole("switch", { name: /gotify health alert notifications/i })).toBeInTheDocument();
+  });
+
+  it("calls updateGotifySettings with health_alerts_enabled when health alerts toggle is clicked", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+
+    fireEvent.click(screen.getByRole("switch", { name: /gotify health alert notifications/i }));
+
+    await waitFor(() => {
+      expect(api.updateGotifySettings).toHaveBeenCalledWith({ health_alerts_enabled: false });
+    });
+  });
+
+  it("hides health alerts sub-toggle and Send test when Gotify is not configured", async () => {
+    vi.mocked(api.fetchGotifySettings).mockResolvedValue(GOTIFY_NOT_CONFIGURED);
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+    expect(screen.queryByRole("switch", { name: /gotify health alert notifications/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^send test$/i })).not.toBeInTheDocument();
+  });
+
+  it("calls testGotifySend when Send test is clicked", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+
+    fireEvent.click(screen.getByRole("button", { name: /^send test$/i }));
+
+    await waitFor(() => {
+      expect(api.testGotifySend).toHaveBeenCalled();
+    });
+  });
+
+  it("shows success message after successful test send", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
+
+    fireEvent.click(screen.getByRole("button", { name: /^send test$/i }));
+
+    await screen.findByText("Test notification sent.");
+  });
+
+  it("shows error message when test send fails", async () => {
+    vi.mocked(api.testGotifySend).mockRejectedValue(new Error("Connection refused"));
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    await screen.findByText("Gotify");
 
     fireEvent.click(screen.getByRole("button", { name: /^send test$/i }));
 

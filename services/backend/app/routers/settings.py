@@ -6,6 +6,8 @@ Endpoints
 GET/PUT  /api/settings/push-threshold   Alert severity push threshold
 GET/PUT  /api/settings/ha               Home Assistant integration toggle
 POST     /api/settings/ha/test          Send a test notification to HA
+GET/PUT  /api/settings/gotify           Gotify integration toggle
+POST     /api/settings/gotify/test      Send a test notification to Gotify
 GET/PUT  /api/settings/llm              LM Studio configuration
 POST     /api/settings/llm/test         Send a synthetic alert to the LLM and return the raw response
 """
@@ -20,6 +22,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from ..auth import require_admin, require_auth
+from ..backends.gotify import GotifyBackend
 from ..backends.homeassistant import HomeAssistantBackend
 from ..dependencies import get_pool
 from ..enricher import _ENRICHMENT_RESPONSE_FORMAT, _SYSTEM_PROMPT, _build_user_prompt
@@ -172,6 +175,105 @@ async def test_ha_send(
         raise HTTPException(status_code=422, detail="HA_WEBHOOK_URL is not configured")
     dashboard_url = os.environ.get("DASHBOARD_URL", "").strip()
     backend = HomeAssistantBackend(url, dashboard_url=dashboard_url)
+    try:
+        await backend.send_test()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"ok": True}
+
+
+# ── Gotify ────────────────────────────────────────────────────────────────────
+
+_GOTIFY_ENABLED_KEY = "gotify_enabled"
+_GOTIFY_HEALTH_ALERTS_KEY = "gotify_health_alerts_enabled"
+
+
+class GotifySettingsResponse(BaseModel):
+    enabled: bool
+    configured: bool  # True when GOTIFY_URL and GOTIFY_APP_TOKEN env vars are set
+    health_alerts_enabled: bool
+
+
+class GotifySettingsRequest(BaseModel):
+    enabled: bool | None = None
+    health_alerts_enabled: bool | None = None
+
+
+def _gotify_configured() -> bool:
+    return bool(os.environ.get("GOTIFY_URL", "").strip()) and bool(
+        os.environ.get("GOTIFY_APP_TOKEN", "").strip()
+    )
+
+
+@router.get("/gotify", response_model=GotifySettingsResponse)
+async def get_gotify_settings(
+    pool=Depends(get_pool),
+    _=Depends(require_auth),
+):
+    """Return current Gotify integration state."""
+    async with pool.acquire() as conn:
+        gotify_row = await conn.fetchrow(
+            "SELECT value FROM config WHERE key = $1", _GOTIFY_ENABLED_KEY
+        )
+        health_row = await conn.fetchrow(
+            "SELECT value FROM config WHERE key = $1", _GOTIFY_HEALTH_ALERTS_KEY
+        )
+    return GotifySettingsResponse(
+        enabled=_row_to_bool(gotify_row),
+        configured=_gotify_configured(),
+        health_alerts_enabled=_row_to_bool(health_row),
+    )
+
+
+@router.put("/gotify", response_model=GotifySettingsResponse)
+async def set_gotify_settings(
+    body: GotifySettingsRequest,
+    pool=Depends(get_pool),
+    _=Depends(require_admin),
+):
+    """Enable or disable Gotify push notifications at runtime. Both fields are optional."""
+    async with pool.acquire() as conn:
+        if body.enabled is not None:
+            await conn.execute(
+                "INSERT INTO config(key, value) VALUES($1, $2) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                _GOTIFY_ENABLED_KEY,
+                str(body.enabled).lower(),
+            )
+        if body.health_alerts_enabled is not None:
+            await conn.execute(
+                "INSERT INTO config(key, value) VALUES($1, $2) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+                _GOTIFY_HEALTH_ALERTS_KEY,
+                str(body.health_alerts_enabled).lower(),
+            )
+        gotify_row = await conn.fetchrow(
+            "SELECT value FROM config WHERE key = $1", _GOTIFY_ENABLED_KEY
+        )
+        health_row = await conn.fetchrow(
+            "SELECT value FROM config WHERE key = $1", _GOTIFY_HEALTH_ALERTS_KEY
+        )
+    final_enabled = body.enabled if body.enabled is not None else _row_to_bool(gotify_row)
+    final_health = body.health_alerts_enabled if body.health_alerts_enabled is not None else _row_to_bool(health_row)
+    return GotifySettingsResponse(
+        enabled=final_enabled,
+        configured=_gotify_configured(),
+        health_alerts_enabled=final_health,
+    )
+
+
+@router.post("/gotify/test", status_code=200)
+async def test_gotify_send(
+    pool=Depends(get_pool),
+    _=Depends(require_admin),
+):
+    """Send a synthetic test notification to the configured Gotify server."""
+    url = os.environ.get("GOTIFY_URL", "").strip()
+    token = os.environ.get("GOTIFY_APP_TOKEN", "").strip()
+    if not url or not token:
+        raise HTTPException(status_code=422, detail="GOTIFY_URL and GOTIFY_APP_TOKEN are not configured")
+    dashboard_url = os.environ.get("DASHBOARD_URL", "").strip()
+    backend = GotifyBackend(url, token, dashboard_url=dashboard_url)
     try:
         await backend.send_test()
     except Exception as exc:

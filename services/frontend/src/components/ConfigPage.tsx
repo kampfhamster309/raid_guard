@@ -4,6 +4,7 @@ import {
   createUser,
   deletePushSubscription,
   deleteUser,
+  fetchGotifySettings,
   fetchHaSettings,
   fetchLlmSettings,
   fetchLlmStatus,
@@ -11,14 +12,16 @@ import {
   fetchUsers,
   fetchVapidPublicKey,
   savePushSubscription,
+  testGotifySend,
   testHaSend,
   testLlm,
+  updateGotifySettings,
   updateHaSettings,
   updateLlmSettings,
   updatePiholeSettings,
 } from "../api";
 import { useRules } from "../hooks/useRules";
-import type { HaSettings, LlmSettings, LlmStatus, PiholeSettings, User } from "../types";
+import type { GotifySettings, HaSettings, LlmSettings, LlmStatus, PiholeSettings, User } from "../types";
 import { TuningSuggestionsSection } from "./TuningSuggestionsSection";
 
 type TestStatus = "idle" | "sending" | "success" | "error";
@@ -414,6 +417,19 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
       .finally(() => setHaLoading(false));
   }, []);
 
+  // ── Gotify settings ──────────────────────────────────────────────────────────
+  const [gotifySettings, setGotifySettings] = useState<GotifySettings | null>(null);
+  const [gotifyLoading, setGotifyLoading] = useState(true);
+  const [gotifyTestStatus, setGotifyTestStatus] = useState<TestStatus>("idle");
+  const [gotifyTestMessage, setGotifyTestMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchGotifySettings()
+      .then(setGotifySettings)
+      .catch(() => {})
+      .finally(() => setGotifyLoading(false));
+  }, []);
+
   // ── Web Push subscription ──────────────────────────────────────────────────
   const [pushSupported] = useState(
     () => "serviceWorker" in navigator && "PushManager" in window
@@ -509,6 +525,39 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
     } catch (e) {
       setTestStatus("error");
       setTestMessage(e instanceof Error ? e.message : "Test failed");
+    }
+  };
+
+  const toggleGotify = async () => {
+    if (!gotifySettings) return;
+    try {
+      const updated = await updateGotifySettings({ enabled: !gotifySettings.enabled });
+      setGotifySettings(updated);
+    } catch {
+      // leave state unchanged on error
+    }
+  };
+
+  const toggleGotifyHealthAlerts = async () => {
+    if (!gotifySettings) return;
+    try {
+      const updated = await updateGotifySettings({ health_alerts_enabled: !gotifySettings.health_alerts_enabled });
+      setGotifySettings(updated);
+    } catch {
+      // leave state unchanged on error
+    }
+  };
+
+  const sendGotifyTest = async () => {
+    setGotifyTestStatus("sending");
+    setGotifyTestMessage(null);
+    try {
+      await testGotifySend();
+      setGotifyTestStatus("success");
+      setGotifyTestMessage("Test notification sent.");
+    } catch (e) {
+      setGotifyTestStatus("error");
+      setGotifyTestMessage(e instanceof Error ? e.message : "Test failed");
     }
   };
 
@@ -826,6 +875,97 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
                   }`}
                 >
                   {testMessage}
+                </div>
+              )}
+            </div>
+
+            {/* Gotify row */}
+            <div className="px-4 py-4">
+              <div className="flex items-center justify-between">
+                <div className="min-w-0 pr-4">
+                  <p className="text-sm font-medium text-slate-200">Gotify</p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {gotifyLoading
+                      ? "Loading…"
+                      : gotifySettings?.configured
+                      ? "Server configured — push alerts to your Gotify apps."
+                      : "GOTIFY_URL / GOTIFY_APP_TOKEN not set. Configure them in your .env to enable."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  {isAdmin && gotifySettings?.configured && (
+                    <button
+                      onClick={() => void sendGotifyTest()}
+                      disabled={gotifyTestStatus === "sending" || !gotifySettings?.configured}
+                      className="px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-slate-200"
+                    >
+                      {gotifyTestStatus === "sending" ? "Sending…" : "Send test"}
+                    </button>
+                  )}
+                  <button
+                    role="switch"
+                    aria-checked={gotifySettings?.enabled ?? false}
+                    aria-label="Gotify notifications"
+                    onClick={isAdmin ? () => void toggleGotify() : undefined}
+                    disabled={gotifyLoading || !gotifySettings?.configured || !isAdmin}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-40 disabled:cursor-not-allowed ${
+                      gotifySettings?.enabled && gotifySettings?.configured
+                        ? "bg-indigo-600"
+                        : "bg-slate-600"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
+                        gotifySettings?.enabled && gotifySettings?.configured
+                          ? "translate-x-4"
+                          : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Health alerts sub-row */}
+              {gotifySettings?.configured && (
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-700/50">
+                  <div className="min-w-0 pr-4">
+                    <p className="text-sm font-medium text-slate-200">Health Alerts</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Notify when a pipeline component becomes unhealthy or recovers.
+                    </p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={gotifySettings?.health_alerts_enabled ?? true}
+                    aria-label="Gotify health alert notifications"
+                    onClick={isAdmin ? () => void toggleGotifyHealthAlerts() : undefined}
+                    disabled={gotifyLoading || !gotifySettings?.configured || !isAdmin}
+                    className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-40 disabled:cursor-not-allowed ${
+                      gotifySettings?.health_alerts_enabled && gotifySettings?.configured
+                        ? "bg-indigo-600"
+                        : "bg-slate-600"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform mt-0.5 ${
+                        gotifySettings?.health_alerts_enabled && gotifySettings?.configured
+                          ? "translate-x-4"
+                          : "translate-x-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
+
+              {gotifyTestMessage && (
+                <div
+                  className={`mt-3 rounded px-3 py-2 text-xs ${
+                    gotifyTestStatus === "success"
+                      ? "bg-emerald-900/50 text-emerald-300 border border-emerald-700"
+                      : "bg-red-900/50 text-red-300 border border-red-700"
+                  }`}
+                >
+                  {gotifyTestMessage}
                 </div>
               )}
             </div>

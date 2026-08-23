@@ -1,26 +1,25 @@
 """
-Health watcher — polls pipeline component health every 60 s and sends HA
-push notifications when a component transitions between healthy and unhealthy.
+Health watcher — polls pipeline component health every 60 s and notifies
+configured backends when a component transitions between healthy and
+unhealthy.
 
 Notifications are sent:
 - On the first poll if a component is already unhealthy (baseline detection).
 - Whenever a component transitions ok→unhealthy or unhealthy→ok.
 
-Controlled by the ``ha_health_alerts_enabled`` config key (default True).
-Exits silently if HA_WEBHOOK_URL is not set.
+Any backend exposing ``send_health_alert(component, component_label, ok)``
+(currently Home Assistant and Gotify) receives these transitions; each
+backend gates its own delivery via its own "health alerts enabled" config
+key and swallows its own delivery errors, so one target's outage never
+blocks another's.
 """
 import asyncio
 import logging
-import os
-from datetime import datetime, timezone
-
-import httpx
 
 from .routers.status import _probe_capture_agent, _probe_db, _probe_redis, _probe_suricata_sync
 
 logger = logging.getLogger(__name__)
 
-_HA_HEALTH_ALERTS_KEY = "ha_health_alerts_enabled"
 _DEFAULT_POLL_INTERVAL = 60.0
 _DEFAULT_INITIAL_DELAY = 60.0
 
@@ -34,42 +33,20 @@ _COMPONENT_LABELS: dict[str, str] = {
 }
 
 
-async def _is_enabled(pool) -> bool:
-    try:
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT value FROM config WHERE key = $1", _HA_HEALTH_ALERTS_KEY
-            )
-        return row["value"].lower() != "false" if row else True
-    except Exception as exc:
-        logger.warning("Could not read %s from DB: %s", _HA_HEALTH_ALERTS_KEY, exc)
-        return True
-
-
-async def _send_notification(webhook_url: str, component: str, ok: bool) -> None:
+async def _notify_targets(targets: list, component: str, ok: bool) -> None:
     label = _COMPONENT_LABELS.get(component, component)
-    payload = {
-        "title": f"raid_guard — {'Component Recovered' if ok else 'Component Unhealthy'}",
-        "message": f"{label} {'has recovered.' if ok else 'is unhealthy.'}",
-        "component": component,
-        "component_label": label,
-        "healthy": ok,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
-            resp = await client.post(webhook_url, json=payload)
-            resp.raise_for_status()
-        logger.info("HA health notification sent: %s ok=%s", component, ok)
-    except Exception as exc:
-        logger.warning("HA health notification failed for %s: %s", component, exc)
+    for target in targets:
+        try:
+            await target.send_health_alert(component, label, ok)
+        except Exception as exc:
+            logger.warning(
+                "Health notification via %s failed for %s: %s",
+                getattr(target, "name", "?"), component, exc,
+            )
 
 
-async def _poll_once(pool, redis_client, app_state, webhook_url: str, last: dict[str, bool | None]) -> None:
+async def _poll_once(pool, redis_client, app_state, targets: list, last: dict[str, bool | None]) -> None:
     """Run one health check cycle and update ``last`` in-place."""
-    if not await _is_enabled(pool):
-        return
-
     db_ok, redis_ok, capture_data, suricata_data = await asyncio.gather(
         _probe_db(pool),
         _probe_redis(redis_client),
@@ -92,9 +69,9 @@ async def _poll_once(pool, redis_client, app_state, webhook_url: str, last: dict
         prev = last[component]
         if prev is None:
             if not ok:
-                await _send_notification(webhook_url, component, ok)
+                await _notify_targets(targets, component, ok)
         elif ok != prev:
-            await _send_notification(webhook_url, component, ok)
+            await _notify_targets(targets, component, ok)
         last[component] = ok
 
 
@@ -102,21 +79,19 @@ async def run_health_watcher(
     pool,
     redis_client,
     app_state,
+    backends: list,
     *,
     initial_delay: float = _DEFAULT_INITIAL_DELAY,
     poll_interval: float = _DEFAULT_POLL_INTERVAL,
 ) -> None:
-    """Long-running task — polls component health and notifies HA on transitions.
+    """Long-running task — polls component health and notifies backends on transitions.
 
-    Uses HA_HEALTH_WEBHOOK_URL when set; falls back to HA_WEBHOOK_URL so that
-    a single-webhook setup works without any extra configuration.
+    ``backends`` is the same notification backend list used by the alert
+    router; only backends exposing ``send_health_alert`` participate here.
     """
-    webhook_url = (
-        os.environ.get("HA_HEALTH_WEBHOOK_URL", "").strip()
-        or os.environ.get("HA_WEBHOOK_URL", "").strip()
-    )
-    if not webhook_url:
-        logger.info("Health watcher: no webhook URL configured; idle.")
+    targets = [b for b in backends if hasattr(b, "send_health_alert")]
+    if not targets:
+        logger.info("Health watcher: no notification targets configured; idle.")
         return
 
     if initial_delay > 0:
@@ -126,7 +101,7 @@ async def run_health_watcher(
 
     while True:
         try:
-            await _poll_once(pool, redis_client, app_state, webhook_url, last)
+            await _poll_once(pool, redis_client, app_state, targets, last)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
