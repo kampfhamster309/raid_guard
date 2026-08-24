@@ -97,9 +97,23 @@ def test_build_payload_uses_ai_summary_when_available():
         "severity": "warning",
         "signature": "ET SCAN",
         "src_ip": "10.0.0.1",
-        "enrichment": {"summary": "Port scan detected on subnet"},
+        "enrichment_json": {"summary": "Port scan detected on subnet"},
     })
     assert "Port scan detected" in payload["message"]
+
+
+def test_build_payload_ignores_legacy_enrichment_key():
+    """Regression guard: the enricher publishes 'enrichment_json', not 'enrichment'."""
+    backend = HomeAssistantBackend("http://ha.local/wh")
+    payload = backend._build_payload({
+        "id": "abc-123",
+        "severity": "warning",
+        "signature": "ET SCAN",
+        "src_ip": "10.0.0.1",
+        "enrichment": {"summary": "Should not be used"},
+    })
+    assert "Should not be used" not in payload["message"]
+    assert payload["message"] == "ET SCAN from 10.0.0.1"
 
 
 def test_build_payload_includes_deep_link():

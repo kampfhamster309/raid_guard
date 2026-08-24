@@ -86,7 +86,7 @@ def test_from_env_reads_dashboard_url(monkeypatch):
 # ── _build_payload ────────────────────────────────────────────────────────────
 
 
-def test_build_payload_uses_signature_when_no_enrichment():
+def test_build_payload_signature_only_when_no_enrichment_or_connection_info():
     backend = GotifyBackend("http://gotify.local", "tok")
     payload = backend._build_payload({
         "id": "abc-123",
@@ -94,22 +94,60 @@ def test_build_payload_uses_signature_when_no_enrichment():
         "signature": "ET MALWARE Beacon",
         "src_ip": "192.168.1.5",
     })
-    assert payload["message"] == "ET MALWARE Beacon from 192.168.1.5"
+    assert "**ET MALWARE Beacon**" in payload["message"]
+    assert "Source: `192.168.1.5`" in payload["message"]
     assert payload["title"] == "raid_guard — CRITICAL"
-    assert payload["priority"] == 8
+    assert payload["priority"] == 10
 
 
-def test_build_payload_uses_ai_summary_when_available():
+def test_build_payload_includes_full_connection_details():
+    backend = GotifyBackend("http://gotify.local", "tok")
+    payload = backend._build_payload({
+        "id": "abc-123",
+        "severity": "warning",
+        "signature": "ET SCAN",
+        "category": "Attempted Information Leak",
+        "src_ip": "10.0.0.1",
+        "dst_ip": "8.8.8.8",
+        "dst_port": 443,
+        "proto": "TCP",
+        "timestamp": "2026-04-11T14:32:00+00:00",
+    })
+    assert "Source: `10.0.0.1` → `8.8.8.8:443` (TCP)" in payload["message"]
+    assert "Category: Attempted Information Leak" in payload["message"]
+    assert "Time: 2026-04-11T14:32:00+00:00" in payload["message"]
+    assert payload["priority"] == 5
+
+
+def test_build_payload_includes_ai_enrichment_when_available():
     backend = GotifyBackend("http://gotify.local", "tok")
     payload = backend._build_payload({
         "id": "abc-123",
         "severity": "warning",
         "signature": "ET SCAN",
         "src_ip": "10.0.0.1",
-        "enrichment": {"summary": "Port scan detected on subnet"},
+        "enrichment_json": {
+            "summary": "Port scan detected on subnet",
+            "severity_reasoning": "Multiple ports probed in a short window.",
+            "recommended_action": "Block the source IP if scanning continues.",
+        },
     })
-    assert "Port scan detected" in payload["message"]
-    assert payload["priority"] == 5
+    assert "Port scan detected on subnet" in payload["message"]
+    assert "_Why this severity:_ Multiple ports probed in a short window." in payload["message"]
+    assert "_Recommended action:_ Block the source IP if scanning continues." in payload["message"]
+
+
+def test_build_payload_ignores_legacy_enrichment_key():
+    """Regression guard: the enricher publishes 'enrichment_json', not 'enrichment'."""
+    backend = GotifyBackend("http://gotify.local", "tok")
+    payload = backend._build_payload({
+        "id": "abc-123",
+        "severity": "info",
+        "signature": "ET SCAN",
+        "src_ip": "10.0.0.1",
+        "enrichment": {"summary": "Should not appear"},
+    })
+    assert "Should not appear" not in payload["message"]
 
 
 def test_build_payload_defaults_priority_for_info():
@@ -118,16 +156,18 @@ def test_build_payload_defaults_priority_for_info():
     assert payload["priority"] == 2
 
 
+def test_build_payload_always_sets_markdown_content_type():
+    backend = GotifyBackend("http://gotify.local", "tok", dashboard_url="")
+    payload = backend._build_payload({"id": "uuid-001", "severity": "info"})
+    assert payload["extras"]["client::display"]["contentType"] == "text/markdown"
+    assert "client::notification" not in payload["extras"]
+
+
 def test_build_payload_includes_click_extra_when_dashboard_url_set():
     backend = GotifyBackend("http://gotify.local", "tok", dashboard_url="http://192.168.1.5:3000")
     payload = backend._build_payload({"id": "uuid-001", "severity": "info"})
     assert payload["extras"]["client::notification"]["click"]["url"] == "http://192.168.1.5:3000?alert=uuid-001"
-
-
-def test_build_payload_no_extras_when_dashboard_url_empty():
-    backend = GotifyBackend("http://gotify.local", "tok", dashboard_url="")
-    payload = backend._build_payload({"id": "uuid-001", "severity": "info"})
-    assert "extras" not in payload
+    assert payload["extras"]["client::display"]["contentType"] == "text/markdown"
 
 
 # ── _is_enabled ───────────────────────────────────────────────────────────────
@@ -231,7 +271,7 @@ async def test_send_health_alert_posts_with_health_token():
     call = mock_client.post.call_args
     assert call.kwargs["params"] == {"token": "healthtok"}
     payload = call.kwargs["json"]
-    assert payload["priority"] == 8
+    assert payload["priority"] == 10
     assert "TimescaleDB" in payload["message"]
 
 

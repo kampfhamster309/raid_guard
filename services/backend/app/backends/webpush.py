@@ -68,7 +68,7 @@ class WebPushBackend:
 
     def _build_payload(self, alert: dict) -> dict:
         alert_id = str(alert.get("id", ""))
-        enrichment = alert.get("enrichment")
+        enrichment = alert.get("enrichment_json")
         body = (
             enrichment.get("summary")
             if isinstance(enrichment, dict)

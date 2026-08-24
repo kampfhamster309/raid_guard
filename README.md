@@ -395,15 +395,37 @@ In the raid_guard dashboard, go to **Config → Notifications**:
 The push threshold (default: `warning`) is shared across every notification
 backend — Home Assistant and Gotify both respect the same severity threshold.
 
-### Message fields
+### Message format
 
-Each Gotify message contains:
+Unlike the Home Assistant integration — a single "message" string plugged
+into an HA automation — Gotify renders Markdown natively, so raid_guard sends
+the full alert context instead of a one-liner:
+
+```
+**ET SCAN Potential SSH Scan**
+
+Source: `192.168.1.5` → `10.0.0.20:22` (TCP)
+Category: Attempted Information Leak
+Time: 2026-04-11T14:32:00+00:00
+
+Repeated SSH connection attempts from an internal host to a single target.
+
+_Why this severity:_ Multiple ports probed in a short window is consistent
+with reconnaissance, not a one-off misconfiguration.
+_Recommended action:_ Confirm the source device is expected to run scans;
+block it if not.
+```
+
+The AI summary / severity reasoning / recommended action lines only appear
+once the alert has been enriched — otherwise the message is just the
+signature and connection details.
 
 | Field | Example | Description |
 |-------|---------|-------------|
 | `title` | `raid_guard — WARNING` | Notification title |
-| `message` | `Port scan detected from 192.168.1.5` | AI summary (if enriched) or signature + src IP |
-| `priority` | `5` | Mapped from severity: `info`=2, `warning`=5, `critical`=8 |
+| `message` | *(see above)* | Markdown: signature, source/destination, category, timestamp, and AI enrichment when available |
+| `priority` | `10` | Mapped from severity: `info`=2, `warning`=5, `critical`=10 — `critical` uses Gotify's top tier so it triggers a heads-up notification (and bypasses do-not-disturb on clients that honor priority, e.g. Gotify's Android app at 8+), while `info` stays quiet |
+| `extras.client::display.contentType` | `text/markdown` | Tells Gotify clients to render the message as Markdown |
 | `extras.client::notification.click.url` | `http://unraid:3000?alert=a1b2c3d4-…` | Deep link to the alert drawer (only set when `DASHBOARD_URL` is configured) |
 
 ---
@@ -474,7 +496,7 @@ HA_HEALTH_WEBHOOK_URL=http://<ha-host>:8123/api/webhook/raid_guard_health
 ### Gotify
 
 Health events use the same message shape as alert notifications
-(`title` / `message` / `priority`) — priority `8` for unhealthy transitions,
+(`title` / `message` / `priority`) — priority `10` for unhealthy transitions,
 `5` for recovered transitions.
 
 Optionally create a **separate Gotify application** for health events and set

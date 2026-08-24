@@ -10,8 +10,10 @@ alerts:raw       Published by the ingestor (RAID-005) for every alert event
 alerts:enriched  Published by the AI enricher (RAID-013) after per-alert
                  enrichment completes (or on enrichment failure/timeout, with
                  the original alert unchanged).  Payload: alert dict with an
-                 additional "enrichment" key.  This is the channel the
-                 notification router and the WebSocket broadcaster subscribe to.
+                 additional "enrichment_json" key (matches the DB column and
+                 the frontend's Alert.enrichment_json field) when enrichment
+                 succeeded.  This is the channel the notification router and
+                 the WebSocket broadcaster subscribe to.
 
 incidents:new    Published by the batch correlator (RAID-015) when a new
                  incident record is created.  Payload: incident dict.

@@ -5,13 +5,24 @@ Sends push notifications to a self-hosted Gotify server (https://gotify.net)
 for qualifying alerts and for pipeline health transitions. Configured via
 ``GOTIFY_URL`` and an application token created in the Gotify web UI.
 
+Unlike the Home Assistant backend (a single "message" string plugged into an
+HA automation), Gotify renders Markdown natively, so messages here carry the
+full alert context — signature, source/destination, category, timestamp, and
+(when available) the AI summary, severity reasoning, and recommended action
+— not just a one-line summary.
+
 Payload fields
 --------------
 title      "raid_guard — <SEVERITY>"
-message    AI summary if available, else Suricata signature name + src IP
-priority   Gotify priority (0-10); mapped from severity
-extras     Deep link to the dashboard (if DASHBOARD_URL set), rendered as a
-           clickable notification by Gotify clients that support it.
+message    Markdown: signature + connection details, plus AI enrichment
+           (summary / severity reasoning / recommended action) when present
+priority   Gotify priority (0-10); mapped from severity so low-signal `info`
+           alerts stay quiet while `critical` ones use Gotify's top tier —
+           high enough to trigger a heads-up notification / bypass DND on
+           clients that respect priority (Gotify's Android app does, at 8+)
+extras     Markdown rendering hint, plus a deep link to the dashboard (if
+           DASHBOARD_URL is set) rendered as a clickable notification by
+           Gotify clients that support it.
 """
 
 import logging
@@ -26,7 +37,11 @@ _TIMEOUT = httpx.Timeout(10.0)
 _GOTIFY_ENABLED_KEY = "gotify_enabled"
 _GOTIFY_HEALTH_ALERTS_KEY = "gotify_health_alerts_enabled"
 
-_PRIORITY_BY_SEVERITY = {"info": 2, "warning": 5, "critical": 8}
+# 0-3 = min/low (quiet, no heads-up), 4-7 = normal, 8-10 = high (heads-up,
+# bypasses do-not-disturb on clients that honour priority).
+_PRIORITY_BY_SEVERITY = {"info": 2, "warning": 5, "critical": 10}
+_PRIORITY_HEALTH_RECOVERED = 5
+_PRIORITY_HEALTH_UNHEALTHY = 10
 
 
 class GotifyBackend:
@@ -59,39 +74,68 @@ class GotifyBackend:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
+    def _build_message(self, alert: dict) -> str:
+        """Build the Markdown message body — full alert context, not just a one-liner."""
+        signature = alert.get("signature") or "Unknown alert"
+        src_ip = alert.get("src_ip") or "unknown"
+        dst_ip = alert.get("dst_ip")
+        dst_port = alert.get("dst_port")
+        proto = alert.get("proto")
+        category = alert.get("category")
+        timestamp = alert.get("timestamp")
+
+        lines = [f"**{signature}**", ""]
+
+        connection = f"Source: `{src_ip}`"
+        if dst_ip:
+            connection += f" → `{dst_ip}{f':{dst_port}' if dst_port else ''}`"
+            if proto:
+                connection += f" ({proto})"
+        lines.append(connection)
+
+        if category:
+            lines.append(f"Category: {category}")
+        if timestamp:
+            lines.append(f"Time: {timestamp}")
+
+        enrichment = alert.get("enrichment_json")
+        if isinstance(enrichment, dict):
+            summary = enrichment.get("summary")
+            severity_reasoning = enrichment.get("severity_reasoning")
+            recommended_action = enrichment.get("recommended_action")
+            if summary:
+                lines += ["", summary]
+            if severity_reasoning:
+                lines += ["", f"_Why this severity:_ {severity_reasoning}"]
+            if recommended_action:
+                lines.append(f"_Recommended action:_ {recommended_action}")
+
+        return "\n".join(lines)
+
     def _build_payload(self, alert: dict) -> dict:
         """Build the JSON payload sent to the Gotify message endpoint."""
         alert_id = str(alert.get("id", ""))
-
-        enrichment = alert.get("enrichment")
-        summary = (
-            enrichment.get("summary")
-            if isinstance(enrichment, dict)
-            else None
-        ) or alert.get("signature") or "Unknown alert"
-
         severity = alert.get("severity", "info")
-        src_ip = alert.get("src_ip", "")
 
         payload = {
             "title": f"raid_guard — {severity.upper()}",
-            "message": f"{summary} from {src_ip}",
+            "message": self._build_message(alert),
             "priority": _PRIORITY_BY_SEVERITY.get(severity, 2),
+            "extras": {"client::display": {"contentType": "text/markdown"}},
         }
 
         if self._dashboard_url and alert_id:
-            payload["extras"] = {
-                "client::notification": {
-                    "click": {"url": f"{self._dashboard_url}?alert={alert_id}"}
-                }
+            payload["extras"]["client::notification"] = {
+                "click": {"url": f"{self._dashboard_url}?alert={alert_id}"}
             }
         return payload
 
     def _build_health_payload(self, component: str, component_label: str, ok: bool) -> dict:
         return {
             "title": f"raid_guard — {'Component Recovered' if ok else 'Component Unhealthy'}",
-            "message": f"{component_label} {'has recovered.' if ok else 'is unhealthy.'}",
-            "priority": 5 if ok else 8,
+            "message": f"**{component_label}** {'has recovered.' if ok else 'is unhealthy.'}",
+            "priority": _PRIORITY_HEALTH_RECOVERED if ok else _PRIORITY_HEALTH_UNHEALTHY,
+            "extras": {"client::display": {"contentType": "text/markdown"}},
         }
 
     async def _is_enabled(self) -> bool:
@@ -149,8 +193,17 @@ class GotifyBackend:
             "id": "00000000-0000-0000-0000-000000000000",
             "severity": "info",
             "signature": "raid_guard test notification",
+            "category": "Test",
             "src_ip": "127.0.0.1",
+            "dst_ip": "127.0.0.1",
+            "dst_port": 0,
+            "proto": "TCP",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "enrichment_json": {
+                "summary": "This is a synthetic test alert — no action needed.",
+                "severity_reasoning": "Test notifications are always sent at info severity.",
+                "recommended_action": "None — this confirms your Gotify connection works.",
+            },
         }
         await self._post(self._token, self._build_payload(test_alert))
         logger.info("Gotify test notification sent successfully")

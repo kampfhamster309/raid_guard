@@ -61,7 +61,7 @@ class HomeAssistantBackend:
         alert_id = str(alert.get("id", ""))
 
         # Prefer an AI-generated summary; fall back to the signature name.
-        enrichment = alert.get("enrichment")
+        enrichment = alert.get("enrichment_json")
         summary = (
             enrichment.get("summary")
             if isinstance(enrichment, dict)
