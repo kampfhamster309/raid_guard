@@ -840,7 +840,7 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
                   <div className="min-w-0 pr-4">
                     <p className="text-sm font-medium text-slate-200">Health Alerts</p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Notify when a pipeline component becomes unhealthy or recovers.
+                      Notify via Home Assistant when a pipeline component becomes unhealthy or recovers.
                     </p>
                   </div>
                   <button
@@ -931,7 +931,7 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
                   <div className="min-w-0 pr-4">
                     <p className="text-sm font-medium text-slate-200">Health Alerts</p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      Notify when a pipeline component becomes unhealthy or recovers.
+                      Notify via Gotify when a pipeline component becomes unhealthy or recovers.
                     </p>
                   </div>
                   <button
