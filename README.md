@@ -129,6 +129,7 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/alerts/{id}` | Single alert detail including raw EVE JSON |
 | `POST` | `/api/alerts/{id}/enrich` | Trigger on-demand LLM enrichment for an alert (422 if LLM not configured, 504 on timeout) |
 | `GET` | `/api/stats` | Last-24 h totals, per-severity hourly chart data (`info`/`warning`/`critical`), top source IPs, top signatures |
+| `GET` | `/api/status` | Pipeline health snapshot for the dashboard Status page — `db`, `redis`, `ingestor`, `enricher`, `capture_agent`, `suricata`, and `detection` (alert-outage stall check), each `{"ok": bool, ...}` |
 | `GET` | `/api/incidents` | Paginated incident list — query params: `limit` (default 20), `offset` |
 | `GET` | `/api/incidents/{id}` | Single incident detail including the full list of related alerts |
 | `GET` | `/api/digests` | Paginated digest list — query params: `limit` (default 10), `offset` |
@@ -217,6 +218,7 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `DB_PASSWORD` | — | TimescaleDB password |
 | `REDIS_URL` | `redis://redis:6379` | Redis connection URL |
 | `EVE_JSON_PATH` | `/var/log/suricata/eve.json` | Suricata EVE JSON log path |
+| `DETECTION_STALL_HOURS` | `6` | Hours with zero alerts (while eve.json is still being written) before `/api/status` and health alerts report the detection engine as stalled |
 | `ADMIN_USERNAME` | `admin` | Dashboard login username |
 | `ADMIN_PASSWORD` | — | Dashboard login password (empty = login disabled) |
 | `JWT_SECRET` | random | HS256 signing key — generate with `secrets.token_hex(32)` |
@@ -433,10 +435,18 @@ signature and connection details.
 ## Health alert notifications
 
 raid_guard can also notify you when a **pipeline component** becomes unhealthy
-or recovers (DB, Redis, Fritzbox Capture, Suricata, Alert Ingestor, AI Enricher).
-Every configured notification backend (Home Assistant, Gotify) receives these
-events independently, each gated by its own **Health Alerts** toggle in
-**Config → Notifications**.
+or recovers (DB, Redis, Fritzbox Capture, Suricata, Alert Ingestor, AI Enricher,
+Alert Detection). Every configured notification backend (Home Assistant, Gotify)
+receives these events independently, each gated by its own **Health Alerts**
+toggle in **Config → Notifications**.
+
+> **Alert Detection** is different from the other components: instead of
+> checking whether a process is running, it checks whether Suricata is
+> actually *producing alerts*. If capture and Suricata both report healthy
+> and eve.json is still being written, but no alert has landed in the
+> database for `DETECTION_STALL_HOURS` (default 6h), it fires unhealthy. This
+> catches a live-but-silent detect engine that a process/port check alone
+> would report as fine.
 
 ### Home Assistant
 
@@ -449,7 +459,7 @@ benefit from a **separate webhook** so you can route them independently.
 |-------|---------|-------------|
 | `title` | `raid_guard — Component Unhealthy` | `Component Unhealthy` or `Component Recovered` |
 | `message` | `TimescaleDB is unhealthy.` | Human-readable description |
-| `component` | `db` | Internal key (`db`, `redis`, `capture_agent`, `suricata`, `ingestor`, `enricher`) |
+| `component` | `db` | Internal key (`db`, `redis`, `capture_agent`, `suricata`, `ingestor`, `enricher`, `detection`) |
 | `component_label` | `TimescaleDB` | Display name |
 | `healthy` | `false` | `true` = recovered, `false` = unhealthy |
 | `timestamp` | `2026-04-11T14:32:00+00:00` | ISO 8601 event timestamp |
