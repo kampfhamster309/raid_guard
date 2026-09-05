@@ -74,8 +74,10 @@ outputs:
         - rdp
         - nfs
         - smb
-        - flow
-        - netflow
+        # flow/netflow removed: the ingestor only reads event_type=="alert"
+        # (services/backend/app/ingestor.py:47) — logging one flow+netflow
+        # event per connection on the whole network was pure write volume,
+        # the main driver behind eve.json growing to 36GB in under a week.
 
   # Disable all other outputs — EVE JSON is the single source of truth.
   - fast:
@@ -193,11 +195,16 @@ flow:
   emergency-recovery: 30
 
 stream:
-  memcap: 64mb
-  checksum-validation: yes
+  memcap: 256mb
+  # Was "yes": large IPv6 downloads were repeatedly false-flagged as
+  # invalid-checksum (likely offload-related upstream of the capture),
+  # which starved stream reassembly of memcap and silently stalled the
+  # whole detect engine for days at a time — see RAID alert-outage incident
+  # 2026-09-01 to 2026-09-05. Detection itself does not depend on this.
+  checksum-validation: no
   inline: no
   reassembly:
-    memcap: 256mb
+    memcap: 1gb
     depth: 1mb
     toserver-chunk-size: 2560
     toclient-chunk-size: 2560
