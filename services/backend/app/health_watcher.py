@@ -16,7 +16,13 @@ blocks another's.
 import asyncio
 import logging
 
-from .routers.status import _probe_capture_agent, _probe_db, _probe_redis, _probe_suricata_sync
+from .routers.status import (
+    _probe_capture_agent,
+    _probe_db,
+    _probe_detection_stall,
+    _probe_redis,
+    _probe_suricata_sync,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +36,7 @@ _COMPONENT_LABELS: dict[str, str] = {
     "suricata": "Suricata IDS",
     "ingestor": "Alert Ingestor",
     "enricher": "AI Enricher",
+    "detection": "Alert Detection",
 }
 
 
@@ -54,6 +61,10 @@ async def _poll_once(pool, redis_client, app_state, targets: list, last: dict[st
         asyncio.to_thread(_probe_suricata_sync),
     )
 
+    detection_data = await _probe_detection_stall(
+        pool, capture_data.get("ok", False), suricata_data.get("ok", False)
+    )
+
     ingestor_task = getattr(app_state, "ingestor_task", None)
     enrich_task = getattr(app_state, "enrich_task", None)
     current: dict[str, bool] = {
@@ -63,6 +74,7 @@ async def _poll_once(pool, redis_client, app_state, targets: list, last: dict[st
         "suricata": suricata_data.get("ok", False),
         "ingestor": ingestor_task is not None and not ingestor_task.done(),
         "enricher": enrich_task is not None and not enrich_task.done(),
+        "detection": detection_data.get("ok", True),
     }
 
     for component, ok in current.items():

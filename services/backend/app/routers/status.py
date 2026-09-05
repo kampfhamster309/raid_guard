@@ -6,18 +6,33 @@ combined health snapshot for the dashboard Status page.
 import asyncio
 import logging
 import os
+import time
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, Request
 
 from ..auth import require_auth
 from ..dependencies import get_pool, get_redis
+from ..ingestor import EVE_JSON_PATH
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 _CAPTURE_AGENT_URL = os.environ.get("CAPTURE_AGENT_URL", "http://capture-agent:8080")
 _SURICATA_CONTAINER = os.environ.get("SURICATA_CONTAINER_NAME", "raid_guard-suricata-1")
+
+# How long with zero alerts, while eve.json is still actively being written,
+# before we consider detection "stalled" rather than just "quiet". Covers the
+# 2026-09-01 incident: Suricata kept processing traffic (flow/http/dns/tls
+# events kept appearing) but a stream-reassembly memcap exhaustion silently
+# stopped the detect engine from producing any alert events for days, while
+# every process/port-level health check kept reporting "healthy".
+_DETECTION_STALL_HOURS = float(os.environ.get("DETECTION_STALL_HOURS", "6"))
+# eve.json must have been written to within this window for us to trust that
+# "no alerts" means detection is stalled rather than Suricata itself being
+# down or capture having stopped (those are reported by their own probes).
+_EVE_JSON_FRESH_SECONDS = 300
 
 
 async def _probe_db(pool) -> bool:
@@ -75,6 +90,47 @@ def _probe_suricata_sync() -> dict:
         return {"ok": False, "running": False, "message": str(exc)}
 
 
+async def _probe_detection_stall(pool, capture_ok: bool, suricata_ok: bool) -> dict:
+    """Detect a live-but-silent detection engine.
+
+    Only meaningful when capture and Suricata both report healthy — if either
+    is already down, that's the more direct signal and this probe stays out
+    of the way (``ok: True``, ``reason: "not_applicable"``) rather than firing
+    a second, redundant alert for the same root cause.
+    """
+    if not (capture_ok and suricata_ok):
+        return {"ok": True, "reason": "not_applicable"}
+
+    try:
+        eve_age_seconds = time.time() - EVE_JSON_PATH.stat().st_mtime
+    except OSError as exc:
+        logger.debug("Detection-stall probe: eve.json stat failed: %s", exc)
+        return {"ok": True, "reason": "eve_json_unreadable"}
+
+    if eve_age_seconds > _EVE_JSON_FRESH_SECONDS:
+        # Suricata isn't writing anything at all right now; that's a Suricata/
+        # capture problem, already covered by those probes.
+        return {"ok": True, "reason": "eve_json_stale"}
+
+    try:
+        async with pool.acquire() as conn:
+            last_alert_at = await conn.fetchval("SELECT max(timestamp) FROM alerts")
+    except Exception as exc:
+        logger.debug("Detection-stall probe: DB query failed: %s", exc)
+        return {"ok": True, "reason": "db_unavailable"}
+
+    if last_alert_at is None:
+        return {"ok": True, "reason": "no_alert_history"}
+
+    stall_hours = (datetime.now(timezone.utc) - last_alert_at).total_seconds() / 3600
+    ok = stall_hours <= _DETECTION_STALL_HOURS
+    return {
+        "ok": ok,
+        "last_alert_hours_ago": round(stall_hours, 1),
+        "stall_threshold_hours": _DETECTION_STALL_HOURS,
+    }
+
+
 @router.get("/status")
 async def get_status(
     pool=Depends(get_pool),
@@ -88,6 +144,9 @@ async def get_status(
         _probe_capture_agent(),
         asyncio.to_thread(_probe_suricata_sync),
     )
+    detection_data = await _probe_detection_stall(
+        pool, capture_data.get("ok", False), suricata_data.get("ok", False)
+    )
     return {
         "db": {"ok": db_ok},
         "redis": {"ok": redis_ok},
@@ -95,4 +154,5 @@ async def get_status(
         "enricher": {"ok": _task_alive(request.app.state, "enrich_task")},
         "capture_agent": capture_data,
         "suricata": suricata_data,
+        "detection": detection_data,
     }

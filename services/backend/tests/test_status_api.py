@@ -35,6 +35,7 @@ def status_client():
         patch("app.routers.status._probe_redis", AsyncMock(return_value=True)),
         patch("app.routers.status._probe_capture_agent", AsyncMock(return_value=_CAPTURE_OK)),
         patch("app.routers.status._probe_suricata_sync", MagicMock(return_value=_SURICATA_OK)),
+        patch("app.routers.status._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         with TestClient(app) as c:
             app.state.ingestor_task = alive
@@ -57,6 +58,7 @@ def test_status_all_ok(status_client):
     assert data["enricher"]["ok"] is True
     assert data["capture_agent"]["ok"] is True
     assert data["suricata"]["ok"] is True
+    assert data["detection"]["ok"] is True
 
 
 def test_status_capture_agent_fields(status_client):
@@ -119,6 +121,15 @@ def test_status_suricata_down(status_client):
     with patch("app.routers.status._probe_suricata_sync", MagicMock(return_value=down)):
         resp = status_client.get("/api/status")
     assert resp.json()["suricata"]["ok"] is False
+
+
+def test_status_detection_stalled(status_client):
+    stalled = {"ok": False, "last_alert_hours_ago": 30.0, "stall_threshold_hours": 6.0}
+    with patch("app.routers.status._probe_detection_stall", AsyncMock(return_value=stalled)):
+        resp = status_client.get("/api/status")
+    detection = resp.json()["detection"]
+    assert detection["ok"] is False
+    assert detection["last_alert_hours_ago"] == 30.0
 
 
 def test_status_ingestor_dead(status_client):

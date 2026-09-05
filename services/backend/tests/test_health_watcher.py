@@ -37,7 +37,7 @@ def _make_target(name="fake"):
     return target
 
 
-_ALL_COMPONENTS = ("db", "redis", "capture_agent", "suricata", "ingestor", "enricher")
+_ALL_COMPONENTS = ("db", "redis", "capture_agent", "suricata", "ingestor", "enricher", "detection")
 
 
 # ── _notify_targets ────────────────────────────────────────────────────────────
@@ -75,6 +75,7 @@ async def test_poll_once_no_notification_when_all_ok_from_start():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         await _poll_once(None, redis, app_state, [target], last)
 
@@ -94,6 +95,7 @@ async def test_poll_once_notifies_when_already_unhealthy_on_first_poll():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         await _poll_once(None, redis, app_state, [target], last)
 
@@ -112,6 +114,7 @@ async def test_poll_once_notifies_on_ok_to_unhealthy_transition():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         await _poll_once(None, redis, app_state, [target], last)
 
@@ -130,6 +133,7 @@ async def test_poll_once_notifies_on_unhealthy_to_ok_transition():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         await _poll_once(None, redis, app_state, [target], last)
 
@@ -148,6 +152,7 @@ async def test_poll_once_no_notification_when_stable_unhealthy():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         await _poll_once(None, redis, app_state, [target], last)
 
@@ -166,6 +171,7 @@ async def test_poll_once_notifies_multiple_targets():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         await _poll_once(None, redis, app_state, [t1, t2], last)
 
@@ -185,10 +191,58 @@ async def test_poll_once_detects_ingestor_crash():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         await _poll_once(None, redis, app_state, [target], last)
 
     target.send_health_alert.assert_awaited_once_with("ingestor", "Alert Ingestor", False)
+
+
+@pytest.mark.asyncio
+async def test_poll_once_detects_detection_stall():
+    """Capture + Suricata report healthy but no alerts for hours — the
+    2026-09-01 incident shape, which the individual process checks alone
+    never catch."""
+    redis = _make_redis()
+    app_state = _make_app_state()
+    target = _make_target()
+    last = {k: True for k in _ALL_COMPONENTS}
+
+    with (
+        patch("app.health_watcher._probe_db", AsyncMock(return_value=True)),
+        patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
+        patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch(
+            "app.health_watcher._probe_detection_stall",
+            AsyncMock(return_value={"ok": False, "last_alert_hours_ago": 30.0}),
+        ),
+    ):
+        await _poll_once(None, redis, app_state, [target], last)
+
+    target.send_health_alert.assert_awaited_once_with("detection", "Alert Detection", False)
+
+
+@pytest.mark.asyncio
+async def test_poll_once_detection_recovers_after_stall():
+    redis = _make_redis()
+    app_state = _make_app_state()
+    target = _make_target()
+    last = {**{k: True for k in _ALL_COMPONENTS}, "detection": False}
+
+    with (
+        patch("app.health_watcher._probe_db", AsyncMock(return_value=True)),
+        patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
+        patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch(
+            "app.health_watcher._probe_detection_stall",
+            AsyncMock(return_value={"ok": True, "last_alert_hours_ago": 0.1}),
+        ),
+    ):
+        await _poll_once(None, redis, app_state, [target], last)
+
+    target.send_health_alert.assert_awaited_once_with("detection", "Alert Detection", True)
 
 
 # ── run_health_watcher ────────────────────────────────────────────────────────
@@ -231,6 +285,7 @@ async def test_run_health_watcher_notifies_configured_targets():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         task = asyncio.create_task(
             run_health_watcher(None, redis, app_state, [target], initial_delay=0, poll_interval=9999)
@@ -254,6 +309,7 @@ async def test_run_health_watcher_cancels_cleanly():
         patch("app.health_watcher._probe_redis", AsyncMock(return_value=True)),
         patch("app.health_watcher._probe_capture_agent", AsyncMock(return_value={"ok": True})),
         patch("app.health_watcher._probe_suricata_sync", MagicMock(return_value={"ok": True})),
+        patch("app.health_watcher._probe_detection_stall", AsyncMock(return_value={"ok": True})),
     ):
         task = asyncio.create_task(
             run_health_watcher(None, redis, app_state, [target], initial_delay=0, poll_interval=9999)
