@@ -9,6 +9,7 @@ declare const self: ServiceWorkerGlobalScope;
 
 // vite-plugin-pwa injects the precache manifest here at build time.
 precacheAndRoute(self.__WB_MANIFEST);
+self.skipWaiting();
 clientsClaim();
 
 // ── Push event ────────────────────────────────────────────────────────────────
