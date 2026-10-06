@@ -20,7 +20,7 @@ const HA_NOT_CONFIGURED: api.HaSettings = { enabled: false, configured: false, h
 const GOTIFY_CONFIGURED: api.GotifySettings = { enabled: true, configured: true, health_alerts_enabled: true };
 const GOTIFY_NOT_CONFIGURED: api.GotifySettings = { enabled: false, configured: false, health_alerts_enabled: true };
 
-const LLM_SETTINGS = { url: "http://lmstudio:1234/v1", model: "gemma-4-27b", timeout: 90, max_tokens: 512 };
+const LLM_SETTINGS = { url: "http://lmstudio:1234/v1", model: "gemma-4-27b", timeout: 90, max_tokens: 512, temperature: 0 };
 
 beforeEach(() => {
   vi.mocked(api.fetchRuleCategories).mockResolvedValue(CATEGORIES);
@@ -127,6 +127,21 @@ describe("ConfigPage — AI Enrichment", () => {
     });
   });
 
+  it("renders temperature field and includes it on save", async () => {
+    render(<ConfigPage currentUser={ADMIN_USER} />);
+    const tempInput = await screen.findByLabelText("Temperature");
+    expect(tempInput).toHaveValue(0);
+
+    fireEvent.change(tempInput, { target: { value: "0.7" } });
+    fireEvent.click(screen.getAllByRole("button", { name: /^save$/i })[0]);
+
+    await waitFor(() => {
+      expect(api.updateLlmSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ temperature: 0.7 })
+      );
+    });
+  });
+
   it("shows success message after save", async () => {
     render(<ConfigPage currentUser={ADMIN_USER} />);
     await screen.findByPlaceholderText(/192.168.1.x:1234/);
@@ -178,7 +193,7 @@ describe("ConfigPage — AI Enrichment", () => {
   });
 
   it("disables Send test prompt button when URL/model are empty", async () => {
-    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512, temperature: 0 });
     render(<ConfigPage currentUser={ADMIN_USER} />);
     await screen.findByPlaceholderText(/192.168.1.x:1234/);
 
@@ -220,7 +235,7 @@ describe("ConfigPage — AI Enrichment", () => {
   });
 
   it("Detect button is disabled when no URL is saved", async () => {
-    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512, temperature: 0 });
     render(<ConfigPage currentUser={ADMIN_USER} />);
     await screen.findByPlaceholderText(/192.168.1.x:1234/);
 

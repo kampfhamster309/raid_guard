@@ -297,7 +297,7 @@ async def test_run_enricher_picks_up_url_change_without_restart():
         nonlocal call_index
         url = url_sequence[min(call_index, len(url_sequence) - 1)]
         call_index += 1
-        return {"url": url, "model": "gemma-4-27b", "timeout": "90", "max_tokens": "512"}
+        return {"url": url, "model": "gemma-4-27b", "timeout": "90", "max_tokens": "512", "temperature": "0"}
 
     redis = MagicMock()
     pubsub = MagicMock()

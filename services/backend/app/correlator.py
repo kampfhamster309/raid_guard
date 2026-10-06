@@ -170,6 +170,7 @@ async def _call_correlator_llm(
     alerts: list[dict],
     model: str,
     timeout: float,
+    temperature: float = 0.0,
 ) -> list[dict]:
     """Call the LLM to correlate alerts.  Returns a list of incident dicts, or [] on failure."""
     try:
@@ -181,7 +182,7 @@ async def _call_correlator_llm(
                     {"role": "user", "content": _build_correlation_prompt(alerts)},
                 ],
                 response_format=_CORRELATION_RESPONSE_FORMAT,
-                temperature=0.2,
+                temperature=temperature,
                 max_tokens=_CORRELATION_MAX_TOKENS,
             ),
             timeout=timeout,
@@ -228,7 +229,7 @@ async def _run_correlation(redis_client, pool) -> None:
 
     client = AsyncOpenAI(base_url=cfg["url"], api_key="lm-studio")
     raw_incidents = await _call_correlator_llm(
-        client, alerts, cfg["model"], float(cfg["timeout"])
+        client, alerts, cfg["model"], float(cfg["timeout"]), float(cfg["temperature"])
     )
 
     if not raw_incidents:

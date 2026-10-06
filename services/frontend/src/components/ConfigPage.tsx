@@ -717,12 +717,27 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
                     <input
                       type="number"
                       min={64}
-                      max={4096}
+                      max={16384}
                       value={llmDraft.max_tokens}
                       onChange={(e) => setLlmDraft({ ...llmDraft, max_tokens: Number(e.target.value) })}
                       disabled={!isAdmin}
                       className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
                     />
+                  </div>
+                  <div>
+                    <label htmlFor="llm-temperature" className="block text-xs text-slate-400 mb-1">Temperature</label>
+                    <input
+                      id="llm-temperature"
+                      type="number"
+                      min={0}
+                      max={2}
+                      step={0.1}
+                      value={llmDraft.temperature}
+                      onChange={(e) => setLlmDraft({ ...llmDraft, temperature: Number(e.target.value) })}
+                      disabled={!isAdmin}
+                      className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                    />
+                    <p className="text-xs text-slate-500 mt-1">0 = greedy decoding. Some servers require 0 with JSON schema output.</p>
                   </div>
                 </div>
 

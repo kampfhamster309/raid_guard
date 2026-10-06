@@ -5,7 +5,7 @@ import * as api from "../api";
 
 vi.mock("../api", () => ({
   fetchPiholeSettings: vi.fn().mockResolvedValue({ configured: false, enabled: false, url: "" }),
-  fetchLlmSettings: vi.fn().mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 }),
+  fetchLlmSettings: vi.fn().mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512, temperature: 0 }),
   fetchFritzStatus: vi.fn().mockResolvedValue({ configured: false, connected: false, host_filter_available: false, model: "", firmware: "" }),
   blockDomain: vi.fn(),
   blockFritzDevice: vi.fn(),
@@ -37,7 +37,7 @@ const ENRICHMENT = {
 describe("AlertDrawer", () => {
   beforeEach(() => {
     vi.mocked(api.fetchPiholeSettings).mockResolvedValue({ configured: false, enabled: false, url: "" });
-    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "", model: "", timeout: 90, max_tokens: 512, temperature: 0 });
     vi.mocked(api.fetchFritzStatus).mockResolvedValue({ configured: false, connected: false, host_filter_available: false, model: "", firmware: "" });
   });
 
@@ -102,7 +102,7 @@ describe("AlertDrawer", () => {
   });
 
   it("shows Request AI Analysis button when unenriched and LLM is configured", async () => {
-    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512, temperature: 0 });
     render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /request ai analysis/i })).toBeInTheDocument()
@@ -110,7 +110,7 @@ describe("AlertDrawer", () => {
   });
 
   it("does not show Request AI Analysis button when alert already has enrichment", async () => {
-    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512, temperature: 0 });
     const enrichedAlert = { ...ALERT, enrichment_json: ENRICHMENT };
     render(<AlertDrawer alert={enrichedAlert} onClose={vi.fn()} />);
     await waitFor(() => expect(vi.mocked(api.fetchLlmSettings)).toHaveBeenCalled());
@@ -118,7 +118,7 @@ describe("AlertDrawer", () => {
   });
 
   it("calls reEnrichAlert and shows AI Analysis on success", async () => {
-    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512, temperature: 0 });
     vi.mocked(api.reEnrichAlert).mockResolvedValue(ENRICHMENT);
 
     render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);
@@ -133,7 +133,7 @@ describe("AlertDrawer", () => {
   });
 
   it("shows error message when reEnrichAlert fails", async () => {
-    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512 });
+    vi.mocked(api.fetchLlmSettings).mockResolvedValue({ url: "http://lm:1234/v1", model: "gemma", timeout: 90, max_tokens: 512, temperature: 0 });
     vi.mocked(api.reEnrichAlert).mockRejectedValue(new Error("LLM timed out — try again"));
 
     render(<AlertDrawer alert={ALERT} onClose={vi.fn()} />);

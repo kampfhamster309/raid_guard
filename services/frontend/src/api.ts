@@ -100,7 +100,14 @@ export async function fetchStats(): Promise<Stats> {
 async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(url, { ...init, headers: { ...authHeaders(), ...(init.headers as Record<string, string> ?? {}) } });
   if (res.status === 401) { clearToken(); window.location.reload(); throw new Error("Unauthorized"); }
-  if (!res.ok) throw new Error(`${init.method ?? "GET"} ${url} failed: ${res.status}`);
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json() as { detail?: unknown };
+      if (typeof body?.detail === "string" && body.detail) detail = ` — ${body.detail}`;
+    } catch { /* non-JSON error body */ }
+    throw new Error(`${init.method ?? "GET"} ${url} failed: ${res.status}${detail}`);
+  }
   return res;
 }
 

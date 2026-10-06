@@ -124,7 +124,7 @@ def test_generate_digest_returns_422_when_llm_not_configured(authed_client):
 
     with patch(
         "app.routers.digests.get_llm_config",
-        new=AsyncMock(return_value={"url": "", "model": "", "timeout": "90", "max_tokens": "512"}),
+        new=AsyncMock(return_value={"url": "", "model": "", "timeout": "90", "max_tokens": "512", "temperature": "0"}),
     ):
         resp = client.post("/api/digests/generate")
 
@@ -139,7 +139,7 @@ def test_generate_digest_returns_204_when_skipped(authed_client):
     with patch(
         "app.routers.digests.get_llm_config",
         new=AsyncMock(
-            return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512"}
+            return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512", "temperature": "0"}
         ),
     ):
         with patch(
@@ -168,7 +168,7 @@ def test_generate_digest_returns_digest_on_success(authed_client):
     with patch(
         "app.routers.digests.get_llm_config",
         new=AsyncMock(
-            return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512"}
+            return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512", "temperature": "0"}
         ),
     ):
         with patch(

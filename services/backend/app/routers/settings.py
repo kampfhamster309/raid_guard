@@ -284,10 +284,11 @@ async def test_gotify_send(
 # ── LLM configuration ─────────────────────────────────────────────────────────
 
 _LLM_DB_KEYS = {
-    "url":        "lm_studio_url",
-    "model":      "lm_studio_model",
-    "timeout":    "lm_enrichment_timeout",
-    "max_tokens": "lm_max_tokens",
+    "url":         "lm_studio_url",
+    "model":       "lm_studio_model",
+    "timeout":     "lm_enrichment_timeout",
+    "max_tokens":  "lm_max_tokens",
+    "temperature": "lm_temperature",
 }
 
 _SYNTHETIC_ALERT = {
@@ -308,6 +309,7 @@ class LlmSettingsResponse(BaseModel):
     model: str
     timeout: int
     max_tokens: int
+    temperature: float
 
 
 class LlmSettingsRequest(BaseModel):
@@ -315,6 +317,7 @@ class LlmSettingsRequest(BaseModel):
     model: str
     timeout: int
     max_tokens: int
+    temperature: float = 0.0
 
 
 @router.get("/llm", response_model=LlmSettingsResponse)
@@ -329,6 +332,7 @@ async def get_llm_settings(
         model=cfg["model"],
         timeout=int(cfg["timeout"]),
         max_tokens=int(cfg["max_tokens"]),
+        temperature=float(cfg["temperature"]),
     )
 
 
@@ -341,14 +345,17 @@ async def set_llm_settings(
     """Persist LLM configuration to the config table."""
     if not 1 <= body.timeout <= 600:
         raise HTTPException(status_code=422, detail="timeout must be between 1 and 600 seconds")
-    if not 64 <= body.max_tokens <= 4096:
-        raise HTTPException(status_code=422, detail="max_tokens must be between 64 and 4096")
+    if not 64 <= body.max_tokens <= 16384:
+        raise HTTPException(status_code=422, detail="max_tokens must be between 64 and 16384")
+    if not 0.0 <= body.temperature <= 2.0:
+        raise HTTPException(status_code=422, detail="temperature must be between 0.0 and 2.0")
 
     updates = {
-        _LLM_DB_KEYS["url"]:        body.url.strip(),
-        _LLM_DB_KEYS["model"]:      body.model.strip(),
-        _LLM_DB_KEYS["timeout"]:    str(body.timeout),
-        _LLM_DB_KEYS["max_tokens"]: str(body.max_tokens),
+        _LLM_DB_KEYS["url"]:         body.url.strip(),
+        _LLM_DB_KEYS["model"]:       body.model.strip(),
+        _LLM_DB_KEYS["timeout"]:     str(body.timeout),
+        _LLM_DB_KEYS["max_tokens"]:  str(body.max_tokens),
+        _LLM_DB_KEYS["temperature"]: str(body.temperature),
     }
     async with pool.acquire() as conn:
         for key, value in updates.items():
@@ -362,6 +369,7 @@ async def set_llm_settings(
         model=body.model.strip(),
         timeout=body.timeout,
         max_tokens=body.max_tokens,
+        temperature=body.temperature,
     )
 
 
@@ -416,6 +424,7 @@ async def test_llm(
     client = AsyncOpenAI(base_url=cfg["url"], api_key="lm-studio")
     timeout = float(cfg["timeout"])
     max_tokens = int(cfg["max_tokens"])
+    temperature = float(cfg["temperature"])
 
     try:
         response = await asyncio.wait_for(
@@ -426,7 +435,7 @@ async def test_llm(
                     {"role": "user", "content": _build_user_prompt(_SYNTHETIC_ALERT)},
                 ],
                 response_format=_ENRICHMENT_RESPONSE_FORMAT,
-                temperature=0.1,
+                temperature=temperature,
                 max_tokens=max_tokens,
             ),
             timeout=timeout,

@@ -158,7 +158,7 @@ _ENRICHMENT = {
     "recommended_action": "Investigate the source device.",
 }
 
-_LLM_CFG = {"url": "http://lm-studio:1234/v1", "model": "gemma-4-27b", "timeout": "90", "max_tokens": "512"}
+_LLM_CFG = {"url": "http://lm-studio:1234/v1", "model": "gemma-4-27b", "timeout": "90", "max_tokens": "512", "temperature": "0"}
 
 
 def test_enrich_alert_returns_enrichment(authed_client):
@@ -182,7 +182,7 @@ def test_enrich_alert_returns_enrichment(authed_client):
 
 def test_enrich_alert_llm_not_configured(authed_client):
     client, conn = authed_client
-    cfg_no_llm = {"url": "", "model": "", "timeout": "90", "max_tokens": "512"}
+    cfg_no_llm = {"url": "", "model": "", "timeout": "90", "max_tokens": "512", "temperature": "0"}
 
     with patch("app.routers.alerts.get_llm_config", AsyncMock(return_value=cfg_no_llm)):
         resp = client.post(f"/api/alerts/{uuid.uuid4()}/enrich")

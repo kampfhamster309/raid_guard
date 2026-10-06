@@ -42,6 +42,7 @@ _DB_CONFIG = [
     _db_row("lm_studio_model",      "gemma-4-27b"),
     _db_row("lm_enrichment_timeout","90"),
     _db_row("lm_max_tokens",        "512"),
+    _db_row("lm_temperature",       "0.5"),
 ]
 
 
@@ -59,6 +60,7 @@ def test_get_llm_settings_returns_db_values(authed_client):
     assert data["model"] == "gemma-4-27b"
     assert data["timeout"] == 90
     assert data["max_tokens"] == 512
+    assert data["temperature"] == 0.5
 
 
 def test_get_llm_settings_falls_back_to_env(authed_client, monkeypatch):
@@ -68,6 +70,7 @@ def test_get_llm_settings_falls_back_to_env(authed_client, monkeypatch):
     monkeypatch.setenv("LM_STUDIO_MODEL", "my-model")
     monkeypatch.setenv("LM_ENRICHMENT_TIMEOUT", "120")
     monkeypatch.setenv("LM_MAX_TOKENS", "256")
+    monkeypatch.setenv("LM_TEMPERATURE", "0.7")
 
     resp = client.get("/api/settings/llm")
     assert resp.status_code == 200
@@ -76,12 +79,13 @@ def test_get_llm_settings_falls_back_to_env(authed_client, monkeypatch):
     assert data["model"] == "my-model"
     assert data["timeout"] == 120
     assert data["max_tokens"] == 256
+    assert data["temperature"] == 0.7
 
 
 def test_get_llm_settings_returns_defaults_when_empty(authed_client, monkeypatch):
     client, conn = authed_client
     conn.fetch = AsyncMock(return_value=[])
-    for key in ("LM_STUDIO_URL", "LM_STUDIO_MODEL", "LM_ENRICHMENT_TIMEOUT", "LM_MAX_TOKENS"):
+    for key in ("LM_STUDIO_URL", "LM_STUDIO_MODEL", "LM_ENRICHMENT_TIMEOUT", "LM_MAX_TOKENS", "LM_TEMPERATURE"):
         monkeypatch.delenv(key, raising=False)
 
     resp = client.get("/api/settings/llm")
@@ -91,6 +95,7 @@ def test_get_llm_settings_returns_defaults_when_empty(authed_client, monkeypatch
     assert data["model"] == ""
     assert data["timeout"] == 90
     assert data["max_tokens"] == 512
+    assert data["temperature"] == 0.0
 
 
 # ── PUT /api/settings/llm ─────────────────────────────────────────────────────
@@ -100,7 +105,7 @@ def test_set_llm_settings_persists_values(authed_client):
     client, conn = authed_client
     conn.execute = AsyncMock()
 
-    payload = {"url": "http://new:1234/v1", "model": "llama-3", "timeout": 60, "max_tokens": 256}
+    payload = {"url": "http://new:1234/v1", "model": "llama-3", "timeout": 60, "max_tokens": 256, "temperature": 0.3}
     resp = client.put("/api/settings/llm", json=payload)
     assert resp.status_code == 200
     data = resp.json()
@@ -108,8 +113,19 @@ def test_set_llm_settings_persists_values(authed_client):
     assert data["model"] == "llama-3"
     assert data["timeout"] == 60
     assert data["max_tokens"] == 256
-    # 4 INSERT … ON CONFLICT calls (one per config key)
-    assert conn.execute.await_count == 4
+    assert data["temperature"] == 0.3
+    # 5 INSERT … ON CONFLICT calls (one per config key)
+    assert conn.execute.await_count == 5
+
+
+def test_set_llm_settings_temperature_defaults_to_zero(authed_client):
+    client, conn = authed_client
+    conn.execute = AsyncMock()
+
+    payload = {"url": "http://new:1234/v1", "model": "llama-3", "timeout": 60, "max_tokens": 256}
+    resp = client.put("/api/settings/llm", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["temperature"] == 0.0
 
 
 def test_set_llm_settings_rejects_timeout_too_low(authed_client):
@@ -132,7 +148,32 @@ def test_set_llm_settings_rejects_max_tokens_too_low(authed_client):
 
 def test_set_llm_settings_rejects_max_tokens_too_high(authed_client):
     client, _ = authed_client
+    resp = client.put("/api/settings/llm", json={"url": "x", "model": "y", "timeout": 90, "max_tokens": 20000})
+    assert resp.status_code == 422
+
+
+def test_set_llm_settings_accepts_max_tokens_8192(authed_client):
+    client, conn = authed_client
+    conn.execute = AsyncMock()
     resp = client.put("/api/settings/llm", json={"url": "x", "model": "y", "timeout": 90, "max_tokens": 8192})
+    assert resp.status_code == 200
+
+
+def test_set_llm_settings_rejects_temperature_too_high(authed_client):
+    client, _ = authed_client
+    resp = client.put(
+        "/api/settings/llm",
+        json={"url": "x", "model": "y", "timeout": 90, "max_tokens": 512, "temperature": 2.5},
+    )
+    assert resp.status_code == 422
+
+
+def test_set_llm_settings_rejects_negative_temperature(authed_client):
+    client, _ = authed_client
+    resp = client.put(
+        "/api/settings/llm",
+        json={"url": "x", "model": "y", "timeout": 90, "max_tokens": 512, "temperature": -0.1},
+    )
     assert resp.status_code == 422
 
 
@@ -204,7 +245,7 @@ def test_llm_status_unreachable(authed_client):
 def test_llm_status_not_configured(authed_client, monkeypatch):
     client, conn = authed_client
     conn.fetch = AsyncMock(return_value=[])
-    for key in ("LM_STUDIO_URL", "LM_STUDIO_MODEL", "LM_ENRICHMENT_TIMEOUT", "LM_MAX_TOKENS"):
+    for key in ("LM_STUDIO_URL", "LM_STUDIO_MODEL", "LM_ENRICHMENT_TIMEOUT", "LM_MAX_TOKENS", "LM_TEMPERATURE"):
         monkeypatch.delenv(key, raising=False)
 
     resp = client.get("/api/settings/llm/status")

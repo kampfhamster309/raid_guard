@@ -201,6 +201,7 @@ async def enrich_alert(
         cfg["model"],
         float(cfg["timeout"]),
         int(cfg["max_tokens"]),
+        float(cfg["temperature"]),
     )
 
     if enrichment is None:

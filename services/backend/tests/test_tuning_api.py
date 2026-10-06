@@ -236,7 +236,7 @@ def test_run_tuner_422_when_llm_not_configured(authed_client):
     client, conn = authed_client
     with patch(
         "app.routers.tuning.get_llm_config",
-        new=AsyncMock(return_value={"url": "", "model": "", "timeout": "90", "max_tokens": "512"}),
+        new=AsyncMock(return_value={"url": "", "model": "", "timeout": "90", "max_tokens": "512", "temperature": "0"}),
     ):
         resp = client.post("/api/tuning/run")
     assert resp.status_code == 422
@@ -246,7 +246,7 @@ def test_run_tuner_returns_empty_list_when_skipped(authed_client):
     client, conn = authed_client
     with patch(
         "app.routers.tuning.get_llm_config",
-        new=AsyncMock(return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512"}),
+        new=AsyncMock(return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512", "temperature": "0"}),
     ):
         with patch(
             "app.routers.tuning.generate_tuning_suggestions",
@@ -274,7 +274,7 @@ def test_run_tuner_returns_suggestions_on_success(authed_client):
     ]
     with patch(
         "app.routers.tuning.get_llm_config",
-        new=AsyncMock(return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512"}),
+        new=AsyncMock(return_value={"url": "http://x:1234/v1", "model": "gemma", "timeout": "90", "max_tokens": "512", "temperature": "0"}),
     ):
         with patch(
             "app.routers.tuning.generate_tuning_suggestions",

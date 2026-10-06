@@ -150,7 +150,7 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/settings/gotify` | Get Gotify integration state (`{"enabled": bool, "configured": bool}`) |
 | `PUT` | `/api/settings/gotify` | Enable or disable Gotify push notifications (body: `{"enabled": bool}`) |
 | `POST` | `/api/settings/gotify/test` | Send a synthetic test notification to the configured Gotify server |
-| `GET` | `/api/settings/llm` | Get LM Studio configuration (URL, model, timeout, max tokens) |
+| `GET` | `/api/settings/llm` | Get LM Studio configuration (URL, model, timeout, max tokens, temperature) |
 | `PUT` | `/api/settings/llm` | Persist LM Studio configuration to the config table |
 | `POST` | `/api/settings/llm/test` | Send a synthetic alert to the LLM and return the raw response |
 | `GET` | `/api/pihole/settings` | Pi-hole connection settings (`{url, enabled, configured}` — password never returned) |
@@ -229,6 +229,18 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `LM_STUDIO_MODEL` | — | Model identifier (e.g. `gemma-4-27b`) |
 | `LM_ENRICHMENT_TIMEOUT` | `90` | LLM request timeout in seconds |
 | `LM_MAX_TOKENS` | `512` | Maximum tokens in the LLM response |
+| `LM_TEMPERATURE` | `0` | Sampling temperature (0.0–2.0), `0` = greedy decoding |
+
+All four values can also be set at runtime in the dashboard under
+**Config → AI Enrichment** (DB values override env vars). Two compatibility
+notes for non-LM-Studio OpenAI-compatible servers:
+
+- Some servers reject `temperature > 0` when a JSON-schema `response_format`
+  is used (greedy decoding only). Keep temperature at `0` if you see 400
+  errors mentioning schema-constrained sampling.
+- **Reasoning models** spend part of the response budget on hidden reasoning
+  tokens. If enrichment comes back empty, raise *Max response tokens*
+  (e.g. `4096`–`8192`) so the visible answer still fits.
 | `PIHOLE_HOST` / `PIHOLE_PASSWORD` | — | Pi-hole v6 address and API password |
 | `HA_WEBHOOK_URL` | — | Home Assistant webhook URL for IDS alert notifications (leave unset to disable HA push) |
 | `HA_HEALTH_WEBHOOK_URL` | — | Separate webhook for pipeline health alerts; falls back to `HA_WEBHOOK_URL` if not set |

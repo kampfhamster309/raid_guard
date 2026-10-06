@@ -231,6 +231,7 @@ async def _call_digest_llm(
     prompt: str,
     model: str,
     timeout: float,
+    temperature: float = 0.0,
 ) -> dict | None:
     """Call the LLM for a digest.  Returns the parsed dict, or None on failure."""
     try:
@@ -242,7 +243,7 @@ async def _call_digest_llm(
                     {"role": "user", "content": prompt},
                 ],
                 response_format=_DIGEST_RESPONSE_FORMAT,
-                temperature=0.3,
+                temperature=temperature,
                 max_tokens=_DIGEST_MAX_TOKENS,
             ),
             timeout=timeout,
@@ -365,7 +366,7 @@ async def _run_digest(pool, redis_client) -> dict | None:
     client = AsyncOpenAI(base_url=cfg["url"], api_key="lm-studio")
     prompt = _build_digest_prompt(stats, incidents, period_start, period_end)
     digest_data = await _call_digest_llm(
-        client, prompt, cfg["model"], float(cfg["timeout"])
+        client, prompt, cfg["model"], float(cfg["timeout"]), float(cfg["temperature"])
     )
 
     if not digest_data:

@@ -17,6 +17,7 @@ _KEY_MAP: dict[str, tuple[str, str, str]] = {
     "model":      ("lm_studio_model",      "LM_STUDIO_MODEL",      ""),
     "timeout":    ("lm_enrichment_timeout","LM_ENRICHMENT_TIMEOUT","90"),
     "max_tokens": ("lm_max_tokens",        "LM_MAX_TOKENS",        "512"),
+    "temperature": ("lm_temperature",      "LM_TEMPERATURE",       "0"),
 }
 
 

@@ -75,6 +75,7 @@ export interface LlmSettings {
   model: string;
   timeout: number;
   max_tokens: number;
+  temperature: number;
 }
 
 export interface LlmStatus {

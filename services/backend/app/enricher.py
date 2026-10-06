@@ -104,6 +104,7 @@ async def _call_llm(
     model: str,
     timeout: float,
     max_tokens: int = 512,
+    temperature: float = 0.0,
 ) -> dict | None:
     """Call LM Studio and return the parsed enrichment dict, or ``None`` on any failure."""
     try:
@@ -115,7 +116,7 @@ async def _call_llm(
                     {"role": "user", "content": _build_user_prompt(alert)},
                 ],
                 response_format=_ENRICHMENT_RESPONSE_FORMAT,
-                temperature=0.1,
+                temperature=temperature,
                 max_tokens=max_tokens,
             ),
             timeout=timeout,
@@ -152,9 +153,10 @@ async def _enrich_one(
     model: str,
     timeout: float,
     max_tokens: int = 512,
+    temperature: float = 0.0,
 ) -> None:
     """Enrich one alert and publish to ``alerts:enriched``.  Never raises."""
-    enrichment = await _call_llm(client, alert, model, timeout, max_tokens)
+    enrichment = await _call_llm(client, alert, model, timeout, max_tokens, temperature)
 
     output = dict(alert)
     if enrichment:
@@ -189,10 +191,11 @@ async def enrich_single_alert(
     model: str,
     timeout: float,
     max_tokens: int = 512,
+    temperature: float = 0.0,
 ) -> dict | None:
     """Call LM Studio for a single alert and return the enrichment dict, or None on failure."""
     client = AsyncOpenAI(base_url=url, api_key="lm-studio")
-    return await _call_llm(client, alert, model, timeout, max_tokens)
+    return await _call_llm(client, alert, model, timeout, max_tokens, temperature)
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -230,6 +233,7 @@ async def run_enricher(redis_client, pool) -> None:
             model = cfg["model"]
             timeout = float(cfg["timeout"])
             max_tokens = int(cfg["max_tokens"])
+            temperature = float(cfg["temperature"])
 
             if lm_url != _cached_url:
                 client = AsyncOpenAI(base_url=lm_url, api_key="lm-studio") if lm_url else None
@@ -241,7 +245,7 @@ async def run_enricher(redis_client, pool) -> None:
 
             if client is not None and model:
                 # Serialised: await fully before processing the next message
-                await _enrich_one(client, redis_client, pool, alert, model, timeout, max_tokens)
+                await _enrich_one(client, redis_client, pool, alert, model, timeout, max_tokens, temperature)
             else:
                 # Passthrough: forward unchanged so WebSocket + notification router work
                 try:

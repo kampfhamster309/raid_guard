@@ -260,6 +260,7 @@ async def _call_tuner_llm(
     model: str,
     timeout: float,
     expected_sigs: list[dict],
+    temperature: float = 0.0,
 ) -> list[dict] | None:
     """Call the LLM for tuning suggestions.  Returns a validated list or None."""
     try:
@@ -271,7 +272,7 @@ async def _call_tuner_llm(
                     {"role": "user", "content": prompt},
                 ],
                 response_format=_TUNER_RESPONSE_FORMAT,
-                temperature=0.2,
+                temperature=temperature,
                 max_tokens=_TUNER_MAX_TOKENS,
             ),
             timeout=timeout,
@@ -397,7 +398,8 @@ async def _run_tuner(pool) -> list[dict] | None:
     client = AsyncOpenAI(base_url=cfg_llm["url"], api_key="lm-studio")
     prompt = _build_tuner_prompt(sigs, cfg["lookback_days"])
     suggestions = await _call_tuner_llm(
-        client, prompt, cfg_llm["model"], float(cfg_llm["timeout"]), sigs
+        client, prompt, cfg_llm["model"], float(cfg_llm["timeout"]), sigs,
+        float(cfg_llm["temperature"]),
     )
 
     if not suggestions:
