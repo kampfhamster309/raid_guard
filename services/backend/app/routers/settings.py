@@ -10,6 +10,7 @@ GET/PUT  /api/settings/gotify           Gotify integration toggle
 POST     /api/settings/gotify/test      Send a test notification to Gotify
 GET/PUT  /api/settings/llm              LM Studio configuration
 POST     /api/settings/llm/test         Send a synthetic alert to the LLM and return the raw response
+GET/PUT  /api/settings/edition          Edition feature flag (basic | pro)
 """
 
 import asyncio
@@ -25,6 +26,8 @@ from ..auth import require_admin, require_auth
 from ..backends.gotify import GotifyBackend
 from ..backends.homeassistant import HomeAssistantBackend
 from ..dependencies import get_pool
+from .. import geoip
+from ..edition import EDITION_PRO, VALID_EDITIONS, get_edition, set_edition
 from ..enricher import _ENRICHMENT_RESPONSE_FORMAT, _SYSTEM_PROMPT, _build_user_prompt
 from ..llm_config import get_llm_config
 
@@ -78,6 +81,40 @@ async def set_push_threshold(
             body.threshold,
         )
     return ThresholdResponse(threshold=body.threshold)
+
+
+# ── Edition (basic / pro) ─────────────────────────────────────────────────────
+
+
+class EditionModel(BaseModel):
+    edition: str
+
+
+@router.get("/edition", response_model=EditionModel)
+async def get_edition_setting(
+    pool=Depends(get_pool),
+    _=Depends(require_auth),
+):
+    """Return the active edition — gates pro-only features in the UI and API."""
+    return EditionModel(edition=await get_edition(pool))
+
+
+@router.put("/edition", response_model=EditionModel)
+async def set_edition_setting(
+    body: EditionModel,
+    pool=Depends(get_pool),
+    _=Depends(require_admin),
+):
+    """Switch between the basic and pro editions."""
+    if body.edition not in VALID_EDITIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"edition must be one of: {', '.join(sorted(VALID_EDITIONS))}",
+        )
+    await set_edition(pool, body.edition)
+    if body.edition == EDITION_PRO:
+        geoip.request_update()  # fetch GeoIP databases now instead of at the next 6h check
+    return EditionModel(edition=body.edition)
 
 
 # ── Home Assistant ────────────────────────────────────────────────────────────

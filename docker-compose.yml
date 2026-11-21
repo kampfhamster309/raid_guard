@@ -112,7 +112,9 @@ services:
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+      GEOIP_DIR: /geoip
     volumes:
+      - geoip_data:/geoip
       - suricata_logs:/var/log/suricata:ro
       - suricata_config:/suricata/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -166,3 +168,4 @@ volumes:
   suricata_config:
   postgres_data:
   redis_data:
+  geoip_data:

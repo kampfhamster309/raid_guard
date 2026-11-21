@@ -1,4 +1,4 @@
-import type { Alert, AlertEnrichment, BlockedDomain, Digest, FritzBlockedDevice, FritzStatus, GotifySettings, HaSettings, Incident, IncidentDetail, LlmSettings, LlmStatus, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
+import type { Alert, AlertEnrichment, BlockedDomain, Digest, Edition, GeoIpStatus, TracerouteResult, FritzBlockedDevice, FritzStatus, GotifySettings, HaSettings, Incident, IncidentDetail, LlmSettings, LlmStatus, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -131,6 +131,43 @@ export async function reloadSuricata(): Promise<string> {
   const res = await authFetch("/api/rules/reload", { method: "POST" });
   const data = (await res.json()) as { message: string };
   return data.message;
+}
+
+// ── Edition / pro features ─────────────────────────────────────────────────────
+
+export async function fetchEdition(): Promise<Edition> {
+  const res = await authFetch("/api/settings/edition");
+  const data = (await res.json()) as { edition: Edition };
+  return data.edition;
+}
+
+export async function updateEdition(edition: Edition): Promise<Edition> {
+  const res = await authFetch("/api/settings/edition", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ edition }),
+  });
+  const data = (await res.json()) as { edition: Edition };
+  return data.edition;
+}
+
+export async function runTraceroute(target: string): Promise<TracerouteResult> {
+  const res = await authFetch("/api/pro/traceroute", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target }),
+  });
+  return res.json() as Promise<TracerouteResult>;
+}
+
+export async function fetchGeoIpStatus(): Promise<GeoIpStatus> {
+  const res = await authFetch("/api/pro/geoip");
+  return res.json() as Promise<GeoIpStatus>;
+}
+
+export async function requestGeoIpUpdate(): Promise<GeoIpStatus> {
+  const res = await authFetch("/api/pro/geoip/update", { method: "POST" });
+  return res.json() as Promise<GeoIpStatus>;
 }
 
 // ── Home Assistant API ────────────────────────────────────────────────────────

@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type { Alert, AlertEnrichment } from "../types";
 import { SeverityBadge } from "./SeverityBadge";
+import { useEdition } from "../edition";
+import { isPublicIp } from "../lib/ip";
 import { blockDomain, blockFritzDevice, fetchFritzStatus, fetchLlmSettings, fetchPiholeSettings, reEnrichAlert } from "../api";
+
+const TracerouteModal = lazy(() => import("./TracerouteModal"));
 
 interface Props {
   alert: Alert | null;
@@ -32,6 +36,8 @@ function extractDomain(rawJson: Record<string, unknown> | null): string {
 }
 
 export function AlertDrawer({ alert, onClose }: Props) {
+  const { edition } = useEdition();
+  const [traceTarget, setTraceTarget] = useState<string | null>(null);
   const [piholeConfigured, setPiholeConfigured] = useState(false);
   const [blockInput, setBlockInput] = useState("");
   const [blocking, setBlocking] = useState(false);
@@ -69,6 +75,7 @@ export function AlertDrawer({ alert, onClose }: Props) {
     setQuarantineIp(alert.src_ip ?? "");
     setQuarantineStatus("idle");
     setQuarantineMessage(null);
+    setTraceTarget(null);
 
     fetchPiholeSettings()
       .then((s) => setPiholeConfigured(s.configured && s.enabled))
@@ -134,6 +141,8 @@ export function AlertDrawer({ alert, onClose }: Props) {
   };
 
   if (!alert) return null;
+
+  const traceableIps = [...new Set([alert.src_ip, alert.dst_ip].filter((ip): ip is string => isPublicIp(ip)))];
 
   return (
     <>
@@ -226,6 +235,32 @@ export function AlertDrawer({ alert, onClose }: Props) {
             </section>
           ) : null}
 
+          {/* Pro: visual traceroute */}
+          {edition === "pro" && traceableIps.length > 0 && (
+            <section>
+              <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 flex items-center gap-2">
+                Trace Route
+                <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300 normal-case tracking-normal">Pro</span>
+              </h2>
+              <div className="bg-slate-800 rounded p-3 space-y-2">
+                <p className="text-xs text-slate-400">
+                  Trace the network path from this server to an external host and show each hop on a map.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {traceableIps.map((ip) => (
+                    <button
+                      key={ip}
+                      onClick={() => setTraceTarget(ip)}
+                      className="px-3 py-1.5 text-xs font-medium rounded bg-indigo-700 hover:bg-indigo-600 transition-colors text-white font-mono"
+                    >
+                      Trace {ip}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* Pi-hole block domain */}
           {piholeConfigured && (
             <section>
@@ -314,6 +349,11 @@ export function AlertDrawer({ alert, onClose }: Props) {
           )}
         </div>
       </aside>
+      {traceTarget && (
+        <Suspense fallback={null}>
+          <TracerouteModal target={traceTarget} onClose={() => setTraceTarget(null)} />
+        </Suspense>
+      )}
     </>
   );
 }

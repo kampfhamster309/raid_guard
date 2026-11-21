@@ -165,6 +165,11 @@ curl -H "Authorization: Bearer <jwt>" http://localhost:8000/api/alerts
 | `GET` | `/api/push/vapid-public-key` | Return VAPID public key for browser push subscription |
 | `POST` | `/api/push/subscribe` | Save a browser push subscription (body: `{"endpoint": "...", "keys": {"p256dh": "...", "auth": "..."}}`) |
 | `DELETE` | `/api/push/subscribe` | Remove a push subscription (body: `{"endpoint": "..."}`) |
+| `GET` | `/api/settings/edition` | Active edition — `{"edition": "basic" \| "pro"}` |
+| `PUT` | `/api/settings/edition` | Switch edition (admin) — body `{"edition": "pro"}` |
+| `POST` | `/api/pro/traceroute` | **Pro.** Traceroute to a public IP with per-hop rDNS, ASN and geolocation (body: `{"target": "1.2.3.4"}`; 422 for private/invalid IPs, 502 if traceroute fails) |
+| `GET` | `/api/pro/geoip` | **Pro.** GeoIP database status (`available`, last update dates, `updating`, `last_error`) |
+| `POST` | `/api/pro/geoip/update` | **Pro.** Force a GeoIP database re-download (admin) |
 | `WS` | `/ws/alerts?token=<jwt>` | Live alert feed (subscribes to `alerts:enriched` Redis channel) |
 | `GET` | `/health` | Liveness check (no auth) |
 
@@ -251,6 +256,8 @@ notes for non-LM-Studio OpenAI-compatible servers:
 | `VAPID_PRIVATE_KEY` | — | VAPID private key (base64url) — generate with `py_vapid` (see `.env.example`) |
 | `VAPID_PUBLIC_KEY` | — | VAPID public key (base64url) — served to browsers for push subscription |
 | `VAPID_SUBJECT` | `mailto:admin@example.com` | VAPID subject — `mailto:` or `https:` URI identifying the push service contact |
+| `GEOIP_DIR` | `/geoip` | Where the pro edition stores the DB-IP Lite databases (the `geoip_data` volume in compose) |
+| `GEOIP_MAX_AGE_DAYS` | `35` | Re-download the GeoIP databases once they are older than this |
 
 ---
 
@@ -535,6 +542,33 @@ GOTIFY_HEALTH_APP_TOKEN=<separate application token>
 
 Enable or disable health alerts per backend at runtime in
 **Config → Notifications → Health Alerts**.
+
+---
+
+## Pro edition
+
+raid_guard ships with a **Basic** and a **Pro** edition. Switch between them in
+**Config → Edition** (admin only); every pro endpoint returns 403 while the
+edition is Basic. Pro features:
+
+### Visual traceroute
+
+Open an alert and click **Trace &lt;ip&gt;** under *Trace Route* (only offered for
+public source/destination IPs). The backend runs `traceroute` (ICMP probes, UDP
+fallback) from the backend container toward the IP and annotates every hop with
+reverse DNS, ASN and location. The result opens as a hop-by-hop path next to an
+interactive OpenStreetMap map; hovering a hop highlights it on the map.
+
+- **Geolocation is fully offline.** It uses the free
+  [DB-IP Lite](https://db-ip.com) city and ASN databases (CC BY 4.0), downloaded
+  into the `geoip_data` volume when Pro is enabled and refreshed monthly. No hop
+  IP is sent to a third-party lookup service.
+- **Map tiles** are loaded by your browser from `tile.openstreetmap.org`.
+- **Pi-hole users:** some blocklists include `db-ip.com`. If *Config → Edition →
+  GeoIP databases* shows a download error, allow `download.db-ip.com` in
+  Pi-hole and click **Update now**.
+- Locations are approximate; anycast addresses (e.g. `1.1.1.1`, `9.9.9.9`) often
+  resolve far from the server that actually answers.
 
 ---
 

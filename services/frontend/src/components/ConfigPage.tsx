@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { EditionSection } from "./EditionSection";
 import {
   changePassword,
   createUser,
@@ -564,6 +565,9 @@ export function ConfigPage({ currentUser }: { currentUser: User }) {
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="max-w-3xl mx-auto space-y-6">
+
+        {/* ── Edition (basic / pro) ──────────────────────────────────────── */}
+        <EditionSection isAdmin={isAdmin} />
 
         {/* ── Rule Categories ────────────────────────────────────────────── */}
         <section>

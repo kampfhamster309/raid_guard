@@ -16,12 +16,13 @@ from .channels import ALERTS_ENRICHED, get_redis_url
 from .correlator import run_correlator
 from .digestor import run_digestor
 from .enricher import run_enricher
+from .geoip import run_geoip_updater
 from .health_watcher import run_health_watcher
 from .ingestor import ingestor_loop
 from .noisetuner import run_noisetuner
 from .notification_router import run_notification_router
 from .dependencies import get_pool, get_redis
-from .routers import alerts, auth, digests, fritz, incidents, pihole, push, rules, settings, stats, status, tuning, users
+from .routers import alerts, auth, digests, fritz, incidents, pihole, pro, push, rules, settings, stats, status, tuning, users
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ async def lifespan(app: FastAPI):
     correlator_task = asyncio.create_task(run_correlator(redis_client, pool))
     digestor_task = asyncio.create_task(run_digestor(redis_client, pool))
     noisetuner_task = asyncio.create_task(run_noisetuner(pool))
+    geoip_task = asyncio.create_task(run_geoip_updater(pool))
 
     backends = [
         b for b in [
@@ -95,9 +97,10 @@ async def lifespan(app: FastAPI):
         noisetuner_task.cancel()
         notif_task.cancel()
         health_watcher_task.cancel()
+        geoip_task.cancel()
         await asyncio.gather(
             ingestor_task, enrich_task, correlator_task, digestor_task,
-            noisetuner_task, notif_task, health_watcher_task,
+            noisetuner_task, notif_task, health_watcher_task, geoip_task,
             return_exceptions=True,
         )
         await redis_client.aclose()
@@ -119,6 +122,7 @@ app.include_router(fritz.router)
 app.include_router(push.router)
 app.include_router(users.router)
 app.include_router(status.router)
+app.include_router(pro.router)
 
 
 @app.get("/health")

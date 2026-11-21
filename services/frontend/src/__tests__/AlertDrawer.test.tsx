@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { AlertDrawer } from "../components/AlertDrawer";
 import type { Alert } from "../types";
 import * as api from "../api";
+import { EditionContext } from "../edition";
 
 vi.mock("../api", () => ({
   fetchPiholeSettings: vi.fn().mockResolvedValue({ configured: false, enabled: false, url: "" }),
@@ -10,6 +11,10 @@ vi.mock("../api", () => ({
   blockDomain: vi.fn(),
   blockFritzDevice: vi.fn(),
   reEnrichAlert: vi.fn(),
+}));
+
+vi.mock("../components/TracerouteModal", () => ({
+  default: ({ target }: { target: string }) => <div data-testid="trace-modal">tracing {target}</div>,
 }));
 
 const ALERT: Alert = {
@@ -183,5 +188,32 @@ describe("AlertDrawer", () => {
     await waitFor(() =>
       expect(screen.getByText("Device not found")).toBeInTheDocument()
     );
+  });
+});
+
+describe("AlertDrawer — pro traceroute", () => {
+  const renderWith = (edition: "basic" | "pro", alert: Alert = ALERT) =>
+    render(
+      <EditionContext.Provider value={{ edition, setEdition: () => {} }}>
+        <AlertDrawer alert={alert} onClose={vi.fn()} />
+      </EditionContext.Provider>
+    );
+
+  it("hides the trace section in the basic edition", () => {
+    renderWith("basic");
+    expect(screen.queryByText("Trace Route")).not.toBeInTheDocument();
+  });
+
+  it("offers a trace only for public IPs and opens the modal", async () => {
+    renderWith("pro");
+    expect(screen.getByRole("button", { name: "Trace 8.8.8.8" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Trace 10.0.0.1" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Trace 8.8.8.8" }));
+    expect(await screen.findByTestId("trace-modal")).toHaveTextContent("tracing 8.8.8.8");
+  });
+
+  it("hides the section when both IPs are private", () => {
+    renderWith("pro", { ...ALERT, dst_ip: "192.168.178.1" });
+    expect(screen.queryByText("Trace Route")).not.toBeInTheDocument();
   });
 });

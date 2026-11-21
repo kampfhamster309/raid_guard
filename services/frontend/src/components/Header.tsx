@@ -1,3 +1,4 @@
+import { useEdition } from "../edition";
 import type { User, WsStatus } from "../types";
 
 const WS_DOT: Record<WsStatus, string> = {
@@ -20,12 +21,18 @@ interface Props {
 }
 
 export function Header({ wsStatus, onRefresh, onLogout, currentUser }: Props) {
+  const { edition } = useEdition();
   return (
     <header className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-700">
       <div className="flex items-center gap-3">
         <span className="font-bold text-white tracking-tight text-lg">
           raid_guard
         </span>
+        {edition === "pro" && (
+          <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
+            Pro
+          </span>
+        )}
         <span className="flex items-center gap-1.5 text-xs text-slate-400">
           <span
             className={`inline-block h-2 w-2 rounded-full ${WS_DOT[wsStatus]}`}

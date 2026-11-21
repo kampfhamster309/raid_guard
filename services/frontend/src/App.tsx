@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { clearToken, fetchAlert, fetchCurrentUser, getToken } from "./api";
+import { clearToken, fetchAlert, fetchCurrentUser, fetchEdition, getToken } from "./api";
+import { EditionContext } from "./edition";
 import { LoginPage } from "./components/LoginPage";
 import { Header } from "./components/Header";
 import { FilterBar } from "./components/FilterBar";
@@ -12,7 +13,7 @@ import { DigestsPage } from "./components/DigestsPage";
 import { BlocklistPage } from "./components/BlocklistPage";
 import { StatusPage } from "./components/StatusPage";
 import { useAlerts } from "./hooks/useAlerts";
-import type { Alert, Severity, User } from "./types";
+import type { Alert, Edition, Severity, User } from "./types";
 
 type SeverityFilter = Severity | "all";
 type Page = "alerts" | "dashboard" | "status" | "incidents" | "digests" | "blocklist" | "config";
@@ -143,9 +144,13 @@ function AlertsPage({
 export default function App() {
   const [authed, setAuthed] = useState(() => getToken() !== null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [edition, setEdition] = useState<Edition>("basic");
 
   useEffect(() => {
     if (!authed) return;
+    fetchEdition()
+      .then(setEdition)
+      .catch(() => setEdition("basic"));
     fetchCurrentUser()
       .then(setCurrentUser)
       .catch(() => {
@@ -173,5 +178,9 @@ export default function App() {
     );
   }
 
-  return <AlertsPage currentUser={currentUser} onLogout={handleLogout} />;
+  return (
+    <EditionContext.Provider value={{ edition, setEdition }}>
+      <AlertsPage currentUser={currentUser} onLogout={handleLogout} />
+    </EditionContext.Provider>
+  );
 }

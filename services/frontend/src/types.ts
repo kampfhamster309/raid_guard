@@ -188,3 +188,48 @@ export interface TuningSuggestion {
   threshold_track: string | null;
   threshold_type: string | null;
 }
+
+// ── Pro edition ───────────────────────────────────────────────────────────────
+
+export type Edition = "basic" | "pro";
+
+export interface HopGeo {
+  lat: number;
+  lon: number;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  country_code: string | null;
+}
+
+export interface HopAsn {
+  number: number;
+  org: string | null;
+}
+
+export interface TraceHop {
+  hop: number;
+  ip: string | null;
+  hostname: string | null;
+  rtt_ms: number | null;
+  private: boolean;
+  geo: HopGeo | null;
+  asn: HopAsn | null;
+}
+
+export interface TracerouteResult {
+  target: string;
+  reached: boolean;
+  hops: TraceHop[];
+  trailing_timeouts: number;
+  geo_available: boolean;
+  duration_ms: number;
+}
+
+export interface GeoIpStatus {
+  available: boolean;
+  city_db_updated: string | null;
+  asn_db_updated: string | null;
+  updating: boolean;
+  last_error: string | null;
+}

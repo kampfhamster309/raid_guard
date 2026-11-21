@@ -11,3 +11,4 @@ openai==2.31.0
 fritzconnection==1.15.1
 pywebpush==2.0.0
 bcrypt==5.0.0
+maxminddb==3.3.0
