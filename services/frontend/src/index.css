@@ -14,3 +14,11 @@ html, body, #root {
   background: #1e293b;
   font: inherit;
 }
+
+/* Horizontally scrollable strips (nav tabs) without a visible scrollbar. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

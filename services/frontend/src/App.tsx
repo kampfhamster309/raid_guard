@@ -33,14 +33,14 @@ const SERVICE_TABS: { id: Page; label: string }[] = [
 
 function NavTabs({ page, onChange }: { page: Page; onChange: (p: Page) => void }) {
   const tabClass = (id: Page) =>
-    `px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+    `flex-shrink-0 whitespace-nowrap px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
       page === id
         ? "border-indigo-500 text-white"
         : "border-transparent text-slate-400 hover:text-slate-200"
     }`;
 
   return (
-    <nav className="flex border-b border-slate-700 bg-slate-800 px-4">
+    <nav className="no-scrollbar flex overflow-x-auto border-b border-slate-700 bg-slate-800 px-2 sm:px-4">
       <div className="flex">
         {IDS_TABS.map((tab) => (
           <button key={tab.id} onClick={() => onChange(tab.id)} aria-current={page === tab.id ? "page" : undefined} className={tabClass(tab.id)}>
@@ -48,7 +48,7 @@ function NavTabs({ page, onChange }: { page: Page; onChange: (p: Page) => void }
           </button>
         ))}
       </div>
-      <div className="flex ml-auto border-l border-slate-700">
+      <div className="flex ml-auto pl-2 border-l border-slate-700">
         {SERVICE_TABS.map((tab) => (
           <button key={tab.id} onClick={() => onChange(tab.id)} aria-current={page === tab.id ? "page" : undefined} className={tabClass(tab.id)}>
             {tab.label}

@@ -23,8 +23,8 @@ interface Props {
 export function Header({ wsStatus, onRefresh, onLogout, currentUser }: Props) {
   const { edition } = useEdition();
   return (
-    <header className="flex items-center justify-between px-4 py-3 bg-slate-900 border-b border-slate-700">
-      <div className="flex items-center gap-3">
+    <header className="flex items-center justify-between gap-2 px-3 sm:px-4 py-3 bg-slate-900 border-b border-slate-700">
+      <div className="flex min-w-0 items-center gap-2 sm:gap-3">
         <span className="font-bold text-white tracking-tight text-lg">
           raid_guard
         </span>
@@ -33,15 +33,15 @@ export function Header({ wsStatus, onRefresh, onLogout, currentUser }: Props) {
             Pro
           </span>
         )}
-        <span className="flex items-center gap-1.5 text-xs text-slate-400">
+        <span className="flex items-center gap-1.5 text-xs text-slate-400" title={WS_LABEL[wsStatus]}>
           <span
             className={`inline-block h-2 w-2 rounded-full ${WS_DOT[wsStatus]}`}
           />
-          {WS_LABEL[wsStatus]}
+          <span className="hidden sm:inline">{WS_LABEL[wsStatus]}</span>
         </span>
       </div>
-      <div className="flex items-center gap-3">
-        <span className="text-xs text-slate-400">
+      <div className="flex flex-shrink-0 items-center gap-2 sm:gap-3">
+        <span className="hidden sm:inline text-xs text-slate-400">
           {currentUser.username}
           <span
             className={`ml-1.5 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
