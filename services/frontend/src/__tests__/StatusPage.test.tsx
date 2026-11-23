@@ -73,6 +73,31 @@ describe("StatusPage — degraded components", () => {
     await screen.findByText("One or more components are not healthy");
   });
 
+  it("shows 'Container not found' instead of 'Stopped' when Suricata can't be located", async () => {
+    vi.mocked(api.fetchStatus).mockResolvedValue({
+      ...ALL_OK,
+      suricata: {
+        ok: false,
+        running: false,
+        state: "not_found",
+        message: "No Suricata container found",
+      },
+    });
+    render(<StatusPage />);
+    await screen.findByText("Container not found");
+    expect(screen.getByText("No Suricata container found")).toBeInTheDocument();
+  });
+
+  it("shows 'Stopped' for a stopped Suricata container", async () => {
+    vi.mocked(api.fetchStatus).mockResolvedValue({
+      ...ALL_OK,
+      suricata: { ok: false, running: false, state: "stopped", health: "unhealthy" },
+    });
+    render(<StatusPage />);
+    await screen.findByText("Unhealthy");
+    expect(screen.getAllByText("Stopped").length).toBeGreaterThan(0);
+  });
+
   it("shows reconnect count when capture agent has retried", async () => {
     vi.mocked(api.fetchStatus).mockResolvedValue(CAPTURE_DOWN);
     render(<StatusPage />);

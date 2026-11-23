@@ -97,6 +97,9 @@ services:
       DB_NAME: ${DB_NAME:-raidguard}
       REDIS_URL: redis://redis:6379
       SURICATA_CONTAINER_NAME: ${COMPOSE_PROJECT_NAME:-raid_guard}-suricata-1
+      # Fallback for the label-based lookup when the name above does not match
+      # (e.g. legacy docker-compose v1 names it <project>_suricata_1).
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-raid_guard}
       CAPTURE_AGENT_URL: http://capture-agent:8080
       SURICATA_DISABLE_CONF: /suricata/config/disable.conf
       SURICATA_DISABLE_CONF_CONTAINER: /etc/suricata/custom/disable.conf

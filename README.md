@@ -228,7 +228,7 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `ADMIN_PASSWORD` | — | Dashboard login password (empty = login disabled) |
 | `JWT_SECRET` | random | HS256 signing key — generate with `secrets.token_hex(32)` |
 | `JWT_EXPIRY_HOURS` | `24` | Token lifetime |
-| `SURICATA_CONTAINER_NAME` | `suricata` | Docker container name for rule reload |
+| `SURICATA_CONTAINER_NAME` | `<project>-suricata-1` | Suricata container name for status checks and rule reload; if it doesn't match, the backend falls back to the `com.docker.compose.service=suricata` label |
 | `SURICATA_DISABLE_CONF` | `/suricata/config/disable.conf` | Path inside the backend container to the disable.conf written by rule management |
 | `LM_STUDIO_URL` | — | LM Studio base URL (e.g. `http://192.168.1.x:1234/v1`) |
 | `LM_STUDIO_MODEL` | — | Model identifier (e.g. `gemma-4-27b`) |

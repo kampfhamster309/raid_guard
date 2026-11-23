@@ -15,12 +15,12 @@ from fastapi import APIRouter, Depends, Request
 from ..auth import require_auth
 from ..dependencies import get_pool, get_redis
 from ..ingestor import EVE_JSON_PATH
+from ..suricata_container import SuricataContainerNotFound, find_suricata_container
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 _CAPTURE_AGENT_URL = os.environ.get("CAPTURE_AGENT_URL", "http://capture-agent:8080")
-_SURICATA_CONTAINER = os.environ.get("SURICATA_CONTAINER_NAME", "raid_guard-suricata-1")
 
 # How long with zero alerts, while eve.json is still actively being written,
 # before we consider detection "stalled" rather than just "quiet". Covers the
@@ -75,19 +75,35 @@ async def _probe_capture_agent() -> dict:
 
 
 def _probe_suricata_sync() -> dict:
+    """Inspect the Suricata container.
+
+    ``state`` distinguishes the failure modes so the dashboard doesn't report
+    "stopped" when the container simply couldn't be located:
+    ``running`` / ``stopped`` / ``not_found`` / ``error`` (Docker API failure).
+    """
     try:
         import docker
         dc = docker.from_env()
-        container = dc.containers.get(_SURICATA_CONTAINER)
-        state = container.attrs.get("State", {})
-        running = state.get("Running", False)
-        health_status = state.get("Health", {}).get("Status", "none")
-        # "none" means no healthcheck configured; treat as ok if running
-        ok = running and health_status != "unhealthy"
-        return {"ok": ok, "running": running, "health": health_status}
+        container = find_suricata_container(dc)
+    except SuricataContainerNotFound as exc:
+        logger.warning("Suricata probe: %s", exc)
+        return {"ok": False, "running": False, "state": "not_found", "message": str(exc)}
     except Exception as exc:
-        logger.debug("Suricata probe failed: %s", exc)
-        return {"ok": False, "running": False, "message": str(exc)}
+        logger.warning("Suricata probe failed: %s", exc)
+        return {"ok": False, "running": False, "state": "error", "message": str(exc)}
+
+    state = container.attrs.get("State", {})
+    running = state.get("Running", False)
+    health_status = state.get("Health", {}).get("Status", "none")
+    # "none" means no healthcheck configured; treat as ok if running
+    ok = running and health_status != "unhealthy"
+    return {
+        "ok": ok,
+        "running": running,
+        "state": "running" if running else "stopped",
+        "health": health_status,
+        "container": container.name,
+    }
 
 
 async def _probe_detection_stall(pool, capture_ok: bool, suricata_ok: bool) -> dict:

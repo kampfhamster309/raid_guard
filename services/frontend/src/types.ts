@@ -157,7 +157,10 @@ export interface CaptureAgentStatus {
 export interface SuricataStatus {
   ok: boolean;
   running?: boolean;
+  /** running | stopped | not_found (container couldn't be located) | error (Docker API failure) */
+  state?: "running" | "stopped" | "not_found" | "error";
   health?: string;
+  container?: string;
   message?: string;
 }
 

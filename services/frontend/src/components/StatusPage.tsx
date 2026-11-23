@@ -104,12 +104,16 @@ function SuricataCard({ data, loading }: { data?: SuricataStatus; loading: boole
   const ok = data?.ok ?? false;
   const health = data?.health ?? "—";
   const healthLabel = health === "none" ? "No healthcheck" : health.charAt(0).toUpperCase() + health.slice(1);
+  const processLabel =
+    data?.state === "not_found" ? "Container not found"
+    : data?.state === "error" ? "Docker unreachable"
+    : data?.running ? "Running" : "Stopped";
 
   return (
     <Card title="Suricata IDS" ok={ok} loading={loading}>
       <Detail
         label="Process"
-        value={loading ? "—" : (data?.running ? "Running" : "Stopped")}
+        value={loading ? "—" : processLabel}
         valueClass={loading ? "text-slate-400" : (data?.running ? "text-emerald-400" : "text-red-400")}
       />
       <Detail
@@ -122,6 +126,9 @@ function SuricataCard({ data, loading }: { data?: SuricataStatus; loading: boole
           : "text-amber-400"
         }
       />
+      {!loading && data?.message && (data.state === "not_found" || data.state === "error") && (
+        <p className="text-xs text-red-400 mt-2 break-words">{data.message}</p>
+      )}
     </Card>
   );
 }

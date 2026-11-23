@@ -15,6 +15,8 @@ from pathlib import Path
 
 import asyncpg
 
+from .suricata_container import SuricataContainerNotFound, find_suricata_container
+
 logger = logging.getLogger(__name__)
 
 # ── Paths & container config ──────────────────────────────────────────────────
@@ -32,10 +34,6 @@ SUPPRESS_CONF_PATH = Path(
 # Same volume but mounted at a different path inside the Suricata container.
 DISABLE_CONF_CONTAINER_PATH = os.environ.get(
     "SURICATA_DISABLE_CONF_CONTAINER", "/etc/suricata/custom/disable.conf"
-)
-
-SURICATA_CONTAINER_NAME = os.environ.get(
-    "SURICATA_CONTAINER_NAME", "raid_guard-suricata-1"
 )
 
 CONFIG_KEY = "disabled_rule_categories"
@@ -260,23 +258,18 @@ def _reload_suricata_sync() -> str:
     Raises RuntimeError on failure.
     """
     import docker  # noqa: PLC0415 — lazy import intentional
-    import docker.errors  # noqa: PLC0415
 
     client = docker.from_env()
     try:
-        container = client.containers.get(SURICATA_CONTAINER_NAME)
-    except docker.errors.NotFound:
-        raise RuntimeError(
-            f"Suricata container '{SURICATA_CONTAINER_NAME}' not found. "
-            "Set the SURICATA_CONTAINER_NAME environment variable to match the "
-            "actual container name (check `docker ps`)."
-        )
+        container = find_suricata_container(client)
+    except SuricataContainerNotFound as exc:
+        raise RuntimeError(str(exc)) from exc
 
     cmd: list[str] = ["suricata-update", "--no-test"]
     if DISABLE_CONF_PATH.exists():
         cmd += ["--disable-conf", DISABLE_CONF_CONTAINER_PATH]
 
-    logger.info("Reloading Suricata: exec %s in %s", cmd, SURICATA_CONTAINER_NAME)
+    logger.info("Reloading Suricata: exec %s in %s", cmd, container.name)
     exit_code, output = container.exec_run(cmd, stderr=True)
     output_str = output.decode("utf-8", errors="replace") if output else ""
 
@@ -287,9 +280,9 @@ def _reload_suricata_sync() -> str:
 
     # SIGHUP does not trigger rule reload in pcap/FIFO mode (it triggers shutdown
     # instead). Container restart is the only reliable apply mechanism.
-    logger.info("Restarting %s to apply updated rules and threshold config", SURICATA_CONTAINER_NAME)
+    logger.info("Restarting %s to apply updated rules and threshold config", container.name)
     container.restart(timeout=10)
-    logger.info("%s restarted — rules and threshold config reloaded", SURICATA_CONTAINER_NAME)
+    logger.info("%s restarted — rules and threshold config reloaded", container.name)
     return "Rules updated and reloaded successfully."
 
 
