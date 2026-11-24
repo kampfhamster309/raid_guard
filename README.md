@@ -224,6 +224,9 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `REDIS_URL` | `redis://redis:6379` | Redis connection URL |
 | `EVE_JSON_PATH` | `/var/log/suricata/eve.json` | Suricata EVE JSON log path |
 | `DETECTION_STALL_HOURS` | `6` | Hours with zero alerts (while eve.json is still being written) before `/api/status` and health alerts report the detection engine as stalled |
+| `EVE_JSON_STALL_MINUTES` | `15` | Minutes without any write to eve.json (while capture and Suricata both report healthy) before Alert Detection reports that no traffic is reaching Suricata |
+| `CAPTURE_READ_TIMEOUT_SECONDS` | `120` | capture-agent: seconds without a byte from the Fritzbox before the stream is dropped and reconnected |
+| `CAPTURE_DATA_STALE_SECONDS` | `300` | capture-agent: seconds without a packet written to the FIFO before `/health` reports degraded |
 | `ADMIN_USERNAME` | `admin` | Dashboard login username |
 | `ADMIN_PASSWORD` | — | Dashboard login password (empty = login disabled) |
 | `JWT_SECRET` | random | HS256 signing key — generate with `secrets.token_hex(32)` |
@@ -466,6 +469,12 @@ toggle in **Config → Notifications**.
 > database for `DETECTION_STALL_HOURS` (default 6h), it fires unhealthy. This
 > catches a live-but-silent detect engine that a process/port check alone
 > would report as fine.
+>
+> It also fires if capture and Suricata both report healthy but eve.json
+> hasn't been written to at all for `EVE_JSON_STALL_MINUTES` (default 15).
+> eve.json carries DNS/HTTP/TLS events, so on a live network that means no
+> packets are reaching Suricata, e.g. a capture stream that went silent
+> without closing.
 
 ### Home Assistant
 

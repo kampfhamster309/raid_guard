@@ -236,3 +236,61 @@ def test_stream_to_fifo_constructs_correct_url(mock_get, tmp_path):
     assert "ifaceorminor=3-19" in called_url
     assert "sid=mysid123" in called_url
     assert "capture=Start" in called_url
+
+
+@patch("app.capture.requests.get")
+def test_stream_to_fifo_uses_finite_read_timeout(mock_get, tmp_path):
+    """A silent-but-open Fritzbox connection must not block forever: the read
+    timeout has to be finite so the stall surfaces as an error and reconnects."""
+    mock_get.return_value = _make_streaming_response([])
+    with patch("builtins.open", mock_open()):
+        stream_to_fifo("192.168.178.1", "3-19", "sid", AgentState(), tmp_path / "t.pcap")
+
+    connect_timeout, read_timeout = mock_get.call_args.kwargs["timeout"]
+    assert read_timeout is not None
+    assert 0 < read_timeout <= 600
+
+
+@patch("app.capture.requests.get")
+def test_stream_to_fifo_propagates_read_timeout(mock_get, tmp_path):
+    """A read timeout mid-stream raises out of stream_to_fifo so capture_loop
+    reconnects (it used to hang here indefinitely)."""
+    import requests
+
+    def stalled():
+        yield _kuz_pcap(b"pkt")
+        raise requests.exceptions.ConnectionError("Read timed out.")
+
+    resp = _make_streaming_response([])
+    resp.iter_content.return_value = stalled()
+    mock_get.return_value = resp
+
+    with patch("builtins.open", mock_open()):
+        with pytest.raises(requests.exceptions.ConnectionError):
+            stream_to_fifo("192.168.178.1", "3-19", "sid", AgentState(), tmp_path / "t.pcap")
+
+
+@patch("app.capture.requests.get")
+def test_stream_to_fifo_records_last_data_time(mock_get, tmp_path):
+    mock_get.return_value = _make_streaming_response([_kuz_pcap(b"pkt")])
+    state = AgentState()
+    assert state.last_data_age() is None
+
+    with patch("builtins.open", mock_open()):
+        stream_to_fifo("192.168.178.1", "3-19", "sid", state, tmp_path / "t.pcap")
+
+    age = state.last_data_age()
+    assert age is not None and age < 5
+
+
+@patch("app.capture.requests.get")
+def test_stream_to_fifo_clears_last_data_time_on_new_stream(mock_get, tmp_path):
+    """A fresh stream must not inherit the previous stream's last-data time."""
+    mock_get.return_value = _make_streaming_response([])
+    state = AgentState()
+    state.mark_data()
+
+    with patch("builtins.open", mock_open()):
+        stream_to_fifo("192.168.178.1", "3-19", "sid", state, tmp_path / "t.pcap")
+
+    assert state.last_data_age() is None

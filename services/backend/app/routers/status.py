@@ -33,6 +33,12 @@ _DETECTION_STALL_HOURS = float(os.environ.get("DETECTION_STALL_HOURS", "6"))
 # "no alerts" means detection is stalled rather than Suricata itself being
 # down or capture having stopped (those are reported by their own probes).
 _EVE_JSON_FRESH_SECONDS = 300
+# eve.json carries dns/http/tls events too, so on a live home network it is
+# written to every few seconds.  If capture and Suricata both claim healthy but
+# eve.json hasn't moved for this long, no traffic is reaching the engine — a
+# failure in its own right (2026-11-24: capture stream went silent while every
+# process-level check stayed green for 8+ hours).
+_EVE_JSON_STALL_SECONDS = float(os.environ.get("EVE_JSON_STALL_MINUTES", "15")) * 60
 
 
 async def _probe_db(pool) -> bool:
@@ -68,6 +74,8 @@ async def _probe_capture_agent() -> dict:
             "capture_state": data.get("capture_state"),
             "reconnect_count": data.get("reconnect_count", 0),
             "message": data.get("message", ""),
+            "last_data_age_seconds": data.get("last_data_age_seconds"),
+            "data_stale": data.get("data_stale", False),
         }
     except Exception as exc:
         logger.debug("Capture agent probe failed: %s", exc)
@@ -123,10 +131,21 @@ async def _probe_detection_stall(pool, capture_ok: bool, suricata_ok: bool) -> d
         logger.debug("Detection-stall probe: eve.json stat failed: %s", exc)
         return {"ok": True, "reason": "eve_json_unreadable"}
 
+    if eve_age_seconds > _EVE_JSON_STALL_SECONDS:
+        # Capture and Suricata both report healthy, yet the engine has produced
+        # no events at all — packets aren't reaching it.  Don't defer to the
+        # other probes here: they're the ones claiming everything is fine.
+        return {
+            "ok": False,
+            "reason": "eve_json_stale",
+            "eve_json_minutes_ago": round(eve_age_seconds / 60, 1),
+            "eve_json_stall_threshold_minutes": round(_EVE_JSON_STALL_SECONDS / 60, 1),
+        }
+
     if eve_age_seconds > _EVE_JSON_FRESH_SECONDS:
-        # Suricata isn't writing anything at all right now; that's a Suricata/
-        # capture problem, already covered by those probes.
-        return {"ok": True, "reason": "eve_json_stale"}
+        # Briefly quiet — too early to call it a stall, and too stale to judge
+        # whether a lack of alerts means anything.
+        return {"ok": True, "reason": "eve_json_quiet"}
 
     try:
         async with pool.acquire() as conn:

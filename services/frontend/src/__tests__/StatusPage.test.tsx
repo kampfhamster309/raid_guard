@@ -18,6 +18,7 @@ const ALL_OK = {
     message: "",
   },
   suricata: { ok: true, running: true, health: "healthy" },
+  detection: { ok: true, last_alert_hours_ago: 0.5, stall_threshold_hours: 6 },
 };
 
 const CAPTURE_DOWN = {
@@ -53,6 +54,7 @@ describe("StatusPage — all ok", () => {
     expect(screen.getByText("Redis")).toBeInTheDocument();
     expect(screen.getByText("Alert Ingestor")).toBeInTheDocument();
     expect(screen.getByText("AI Enricher")).toBeInTheDocument();
+    expect(screen.getByText("Alert Detection")).toBeInTheDocument();
   });
 
   it("shows the capture state label", async () => {
@@ -145,5 +147,55 @@ describe("StatusPage — refresh", () => {
   it("shows last updated time after load", async () => {
     render(<StatusPage />);
     await screen.findByText(/Last updated/);
+  });
+});
+
+describe("StatusPage — silent pipeline (2026-11-24)", () => {
+  it("flags no-traffic even though capture and Suricata report healthy", async () => {
+    vi.mocked(api.fetchStatus).mockResolvedValue({
+      ...ALL_OK,
+      detection: {
+        ok: false,
+        reason: "eve_json_stale",
+        eve_json_minutes_ago: 510,
+        eve_json_stall_threshold_minutes: 15,
+      },
+    });
+    render(<StatusPage />);
+    await screen.findByText("One or more components are not healthy");
+    expect(screen.getByText("No traffic reaching Suricata")).toBeInTheDocument();
+    expect(screen.getByText(/hasn't logged any event for 8\.5 h/)).toBeInTheDocument();
+  });
+
+  it("shows detection stalled when alerts stop but traffic flows", async () => {
+    vi.mocked(api.fetchStatus).mockResolvedValue({
+      ...ALL_OK,
+      detection: { ok: false, last_alert_hours_ago: 30, stall_threshold_hours: 6 },
+    });
+    render(<StatusPage />);
+    await screen.findByText("Detection stalled");
+  });
+
+  it("shows last packet age and stale message on the capture card", async () => {
+    vi.mocked(api.fetchStatus).mockResolvedValue({
+      ...ALL_OK,
+      capture_agent: {
+        ...ALL_OK.capture_agent,
+        ok: false,
+        last_data_age_seconds: 600,
+        data_stale: true,
+        message: "No packets received for over 300s — stream stalled",
+      },
+    });
+    render(<StatusPage />);
+    await screen.findByText("10 min ago");
+    expect(screen.getByText(/stream stalled/)).toBeInTheDocument();
+  });
+
+  it("still renders when the backend omits the detection key", async () => {
+    const { detection: _omit, ...legacy } = ALL_OK;
+    vi.mocked(api.fetchStatus).mockResolvedValue(legacy);
+    render(<StatusPage />);
+    await screen.findByText("All systems operational");
   });
 });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchStatus } from "../api";
-import type { CaptureAgentStatus, SuricataStatus, SystemStatus } from "../types";
+import type { CaptureAgentStatus, DetectionStatus, SuricataStatus, SystemStatus } from "../types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -12,6 +12,13 @@ const CAPTURE_STATE_LABELS: Record<string, string> = {
   reconnecting: "Reconnecting…",
   error: "Error",
 };
+
+function formatAge(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)}s ago`;
+  const minutes = seconds / 60;
+  if (minutes < 90) return `${Math.round(minutes)} min ago`;
+  return `${(minutes / 60).toFixed(1)} h ago`;
+}
 
 function captureStateColor(state?: string): string {
   if (state === "streaming") return "text-emerald-400";
@@ -86,6 +93,16 @@ function CaptureCard({ data, loading }: { data?: CaptureAgentStatus; loading: bo
         value={loading ? "—" : stateLabel}
         valueClass={loading ? "text-slate-400" : captureStateColor(state)}
       />
+      {!loading && data?.last_data_age_seconds != null && (
+        <Detail
+          label="Last packet"
+          value={formatAge(data.last_data_age_seconds)}
+          valueClass={data.data_stale ? "text-red-400" : "text-slate-300"}
+        />
+      )}
+      {!loading && data?.data_stale && data.message && (
+        <p className="text-xs text-red-400 mt-2 break-words">{data.message}</p>
+      )}
       {!loading && (data?.reconnect_count ?? 0) > 0 && (
         <Detail
           label="Reconnects"
@@ -129,6 +146,37 @@ function SuricataCard({ data, loading }: { data?: SuricataStatus; loading: boole
       {!loading && data?.message && (data.state === "not_found" || data.state === "error") && (
         <p className="text-xs text-red-400 mt-2 break-words">{data.message}</p>
       )}
+    </Card>
+  );
+}
+
+function DetectionCard({ data, loading }: { data?: DetectionStatus; loading: boolean }) {
+  const ok = data?.ok ?? true;
+  let summary = "Producing alerts";
+  let detail: string | null = null;
+  if (data?.reason === "eve_json_stale") {
+    summary = "No traffic reaching Suricata";
+    if (data.eve_json_minutes_ago != null) {
+      detail = `Suricata hasn't logged any event for ${formatAge(data.eve_json_minutes_ago * 60).replace(" ago", "")}, although capture and Suricata report healthy.`;
+    }
+  } else if (data && !data.ok && data.last_alert_hours_ago != null) {
+    summary = "Detection stalled";
+    detail = `No alerts for ${data.last_alert_hours_ago} h while Suricata is processing traffic.`;
+  } else if (data?.reason === "not_applicable") {
+    summary = "See capture / Suricata";
+  } else if (data?.reason && data.reason !== "eve_json_quiet") {
+    summary = "Not checked";
+  } else if (data?.last_alert_hours_ago != null) {
+    summary = `Last alert ${formatAge(data.last_alert_hours_ago * 3600)}`;
+  }
+  return (
+    <Card title="Alert Detection" ok={ok} loading={loading}>
+      <Detail
+        label="Status"
+        value={loading ? "—" : summary}
+        valueClass={loading ? "text-slate-400" : (ok ? "text-emerald-400" : "text-red-400")}
+      />
+      {!loading && detail && <p className="text-xs text-red-400 mt-2 break-words">{detail}</p>}
     </Card>
   );
 }
@@ -191,7 +239,8 @@ export function StatusPage() {
     status.ingestor.ok &&
     status.enricher.ok &&
     status.capture_agent.ok &&
-    status.suricata.ok;
+    status.suricata.ok &&
+    (status.detection?.ok ?? true);
 
   return (
     <div className="flex-1 overflow-auto p-6">
@@ -237,6 +286,7 @@ export function StatusPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <CaptureCard data={status?.capture_agent} loading={loading} />
         <SuricataCard data={status?.suricata} loading={loading} />
+        <DetectionCard data={status?.detection} loading={loading} />
         <SimpleCard
           title="TimescaleDB"
           ok={status?.db.ok ?? false}

@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 
 FIFO_PATH = Path(os.environ.get("FIFO_PATH", "/pcap/fritz.pcap"))
 CHUNK_SIZE = 4096
+# Seconds without a single byte from the Fritzbox before the stream is treated
+# as dead and torn down for a reconnect.  Without this (it used to be None) a
+# connection that goes silent without closing — Wi-Fi hiccup, NAT timeout,
+# Fritzbox-side capture drop — blocks the read forever while /health keeps
+# reporting "streaming".  A busy LAN interface never goes quiet this long.
+READ_TIMEOUT = float(os.environ.get("CAPTURE_READ_TIMEOUT_SECONDS", "120"))
 
 # ── pcap format constants ──────────────────────────────────────────────────────
 _PCAP_GLOBAL_LEN  = 24   # global header length (same for all pcap variants)
@@ -128,7 +134,8 @@ def stream_to_fifo(
     # the FIFO read end, the first write is immediate — pcap_next_ex() finds
     # packets right away and does not return -1.
     logger.info("Opening Fritzbox capture stream")
-    with requests.get(url, stream=True, timeout=(10, None)) as resp:
+    state.clear_data()
+    with requests.get(url, stream=True, timeout=(10, READ_TIMEOUT)) as resp:
         resp.raise_for_status()
 
         # open() on a FIFO blocks here until Suricata opens the read end.
@@ -140,5 +147,6 @@ def stream_to_fifo(
             for data in _rewrite_kuznetzov(resp.iter_content(chunk_size=CHUNK_SIZE)):
                 fifo.write(data)
                 fifo.flush()
+                state.mark_data()
 
     logger.info("Fritzbox capture stream ended")

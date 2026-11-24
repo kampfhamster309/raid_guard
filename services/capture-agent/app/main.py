@@ -21,6 +21,10 @@ FRITZ_IFACE_ID = os.environ.get("FRITZ_IFACE_ID", "3-19")
 
 BASE_RECONNECT_DELAY = 2   # seconds
 MAX_RECONNECT_DELAY = 30   # seconds
+# /health reports degraded when state says "streaming" but nothing has been
+# written to the FIFO for this long.  Catches hangs the read timeout can't:
+# e.g. fifo.write() blocked because Suricata stopped reading.
+DATA_STALE_SECONDS = float(os.environ.get("CAPTURE_DATA_STALE_SECONDS", "300"))
 
 
 async def capture_loop(state: AgentState = agent_state) -> None:
@@ -80,9 +84,26 @@ app = FastAPI(title="raid_guard capture-agent", lifespan=lifespan)
 async def health():
     state_dict = agent_state.to_dict()
     is_streaming = state_dict["capture_state"] == CaptureState.STREAMING.value
+    age = state_dict["last_data_age_seconds"]
+    # "streaming" with no data yet is allowed for a grace period equal to the
+    # stale threshold, measured from when the state became STREAMING.
+    data_stale = is_streaming and (
+        (age is not None and age > DATA_STALE_SECONDS)
+        or (age is None and agent_state.state_age() > DATA_STALE_SECONDS)
+    )
+    healthy = is_streaming and not data_stale
+    if data_stale:
+        state_dict["message"] = (
+            f"No packets received for over {int(DATA_STALE_SECONDS)}s — stream stalled"
+        )
     return JSONResponse(
-        {"status": "ok" if is_streaming else "degraded", "service": "capture-agent", **state_dict},
-        status_code=200 if is_streaming else 503,
+        {
+            "status": "ok" if healthy else "degraded",
+            "service": "capture-agent",
+            "data_stale": data_stale,
+            **state_dict,
+        },
+        status_code=200 if healthy else 503,
     )
 
 

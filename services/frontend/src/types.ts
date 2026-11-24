@@ -152,6 +152,20 @@ export interface CaptureAgentStatus {
   capture_state?: string;
   reconnect_count?: number;
   message?: string;
+  /** Seconds since the last packet was written to the FIFO; null before the first one. */
+  last_data_age_seconds?: number | null;
+  /** State says "streaming" but no packets have arrived for too long. */
+  data_stale?: boolean;
+}
+
+export interface DetectionStatus {
+  ok: boolean;
+  /** not_applicable | eve_json_unreadable | eve_json_stale | eve_json_quiet | db_unavailable | no_alert_history */
+  reason?: string;
+  last_alert_hours_ago?: number;
+  stall_threshold_hours?: number;
+  eve_json_minutes_ago?: number;
+  eve_json_stall_threshold_minutes?: number;
 }
 
 export interface SuricataStatus {
@@ -171,6 +185,8 @@ export interface SystemStatus {
   enricher: { ok: boolean };
   capture_agent: CaptureAgentStatus;
   suricata: SuricataStatus;
+  /** Optional so an older backend without the probe doesn't break the page. */
+  detection?: DetectionStatus;
 }
 
 export type TuningAction = "suppress" | "threshold-adjust" | "keep";
