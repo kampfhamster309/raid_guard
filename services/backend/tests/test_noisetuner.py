@@ -177,28 +177,48 @@ async def test_call_tuner_llm_nulls_threshold_params_for_suppress():
     assert suppress_item["threshold_type"] is None
 
 
-@pytest.mark.asyncio
-async def test_call_tuner_llm_uses_echoed_signature_id():
-    """LLM-echoed signature_id takes priority over string lookup."""
-    data = {
-        "suggestions": [{
-            "signature_id":      9999999,  # not in sig_lookup but LLM echoed it
-            "signature":         "ET SCAN Potential SSH Scan slightly rephrased",
-            "assessment":        "Noise.",
-            "action":            "suppress",
-            "threshold_type":    None,
-            "threshold_track":   None,
-            "threshold_count":   None,
-            "threshold_seconds": None,
-        }]
-    }
+def _single_suggestion(signature_id, signature):
+    return {"suggestions": [{
+        "signature_id":      signature_id,
+        "signature":         signature,
+        "assessment":        "Noise.",
+        "action":            "suppress",
+        "threshold_type":    None,
+        "threshold_track":   None,
+        "threshold_count":   None,
+        "threshold_seconds": None,
+    }]}
+
+
+async def _run_single(data):
     client = AsyncMock()
     client.chat.completions.create = AsyncMock(
         return_value=_make_openai_response(json.dumps(data))
     )
-    result = await _call_tuner_llm(client, "prompt", "gemma", 90.0, _SAMPLE_SIGS)
+    return await _call_tuner_llm(client, "prompt", "gemma", 90.0, _SAMPLE_SIGS)
+
+
+@pytest.mark.asyncio
+async def test_call_tuner_llm_matches_rephrased_name_by_echoed_id():
+    """A rephrased name is matched via the echoed id; stored name/id come from the DB."""
+    result = await _run_single(_single_suggestion(2001219, "ET SCAN Potential SSH Scan slightly rephrased"))
     assert result is not None
-    assert result[0]["signature_id"] == 9999999
+    assert result[0]["signature_id"] == 2001219
+    assert result[0]["signature"] == "ET SCAN Potential SSH Scan"
+
+
+@pytest.mark.asyncio
+async def test_call_tuner_llm_ignores_invented_signature_id():
+    """A wrong echoed id never wins over the DB id for the named signature."""
+    result = await _run_single(_single_suggestion(9999999, "ET SCAN Potential SSH Scan"))
+    assert result is not None
+    assert result[0]["signature_id"] == 2001219
+
+
+@pytest.mark.asyncio
+async def test_call_tuner_llm_drops_unknown_signature():
+    result = await _run_single(_single_suggestion(9999999, "ET SOMETHING never sent"))
+    assert result is None
 
 
 @pytest.mark.asyncio

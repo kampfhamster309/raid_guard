@@ -365,9 +365,12 @@ async def _run_digest(pool, redis_client) -> dict | None:
 
     client = AsyncOpenAI(base_url=cfg["url"], api_key="lm-studio")
     prompt = _build_digest_prompt(stats, incidents, period_start, period_end)
-    digest_data = await _call_digest_llm(
-        client, prompt, cfg["model"], float(cfg["timeout"]), float(cfg["temperature"])
-    )
+    try:
+        digest_data = await _call_digest_llm(
+            client, prompt, cfg["model"], float(cfg["timeout"]), float(cfg["temperature"])
+        )
+    finally:
+        await client.close()
 
     if not digest_data:
         return None

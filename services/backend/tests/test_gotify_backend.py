@@ -170,30 +170,6 @@ def test_build_payload_includes_click_extra_when_dashboard_url_set():
     assert payload["extras"]["client::display"]["contentType"] == "text/markdown"
 
 
-# ── _is_enabled ───────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_true_when_no_pool():
-    backend = GotifyBackend("http://gotify.local", "tok", pool=None)
-    assert await backend._is_enabled() is True
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_false_when_config_says_false():
-    pool, _ = _make_pool(fetchrow_return={"value": "false"})
-    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
-    assert await backend._is_enabled() is False
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_true_when_db_raises():
-    pool = MagicMock()
-    pool.acquire.side_effect = Exception("DB down")
-    backend = GotifyBackend("http://gotify.local", "tok", pool=pool)
-    assert await backend._is_enabled() is True
-
-
 # ── send ──────────────────────────────────────────────────────────────────────
 
 

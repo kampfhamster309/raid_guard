@@ -11,7 +11,8 @@ from app.auth import (
     JWT_ALGORITHM,
     JWT_SECRET,
     create_token,
-    decode_token,
+    record_failure,
+    user_from_token,
     hash_password,
     verify_password,
 )
@@ -36,7 +37,7 @@ def test_verify_password_wrong():
     assert verify_password("wrong", h) is False
 
 
-# ── create_token / decode_token ───────────────────────────────────────────────
+# ── create_token / user_from_token ───────────────────────────────────────────────
 
 
 def test_create_token_returns_string():
@@ -57,37 +58,85 @@ def test_create_token_contains_exp():
     assert "exp" in payload and payload["exp"] > time.time()
 
 
-def test_decode_token_valid():
-    token = create_token("admin", "admin")
-    assert decode_token(token) == "admin"
+def _pool_with_row(row):
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value=row)
+    pool = MagicMock()
+    pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
+    pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+    return pool
 
 
-def test_decode_token_invalid_raises_401():
+_HASH = hash_password("correct-horse")
+_ADMIN_ROW = {"username": "admin", "password_hash": _HASH, "role": "admin"}
+
+
+@pytest.mark.asyncio
+async def test_user_from_token_valid_takes_role_from_db():
+    token = create_token("admin", "viewer", _HASH)  # stale role claim
+    user = await user_from_token(_pool_with_row(_ADMIN_ROW), token)
+    assert (user.username, user.role) == ("admin", "admin")
+
+
+@pytest.mark.asyncio
+async def test_user_from_token_rejects_deleted_user():
     from fastapi import HTTPException
+    token = create_token("admin", "admin", _HASH)
     with pytest.raises(HTTPException) as exc_info:
-        decode_token("not.a.valid.token")
+        await user_from_token(_pool_with_row(None), token)
     assert exc_info.value.status_code == 401
 
 
-def test_decode_token_expired_raises_401():
+@pytest.mark.asyncio
+async def test_user_from_token_rejects_token_from_before_password_change():
+    from fastapi import HTTPException
+    token = create_token("admin", "admin", hash_password("old-password"))
+    with pytest.raises(HTTPException) as exc_info:
+        await user_from_token(_pool_with_row(_ADMIN_ROW), token)
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_user_from_token_trusts_claims_when_db_down():
+    pool = MagicMock()
+    pool.acquire.side_effect = OSError("db down")
+    user = await user_from_token(pool, create_token("admin", "viewer", _HASH))
+    assert (user.username, user.role) == ("admin", "viewer")
+
+
+@pytest.mark.asyncio
+async def test_user_from_token_invalid_raises_401():
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as exc_info:
+        await user_from_token(_pool_with_row(_ADMIN_ROW), "not.a.valid.token")
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_user_from_token_expired_raises_401():
     from fastapi import HTTPException
     from datetime import datetime, timezone, timedelta
     payload = {"sub": "admin", "role": "admin",
                "exp": datetime.now(timezone.utc) - timedelta(hours=1)}
     expired = pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     with pytest.raises(HTTPException) as exc_info:
-        decode_token(expired)
+        await user_from_token(_pool_with_row(_ADMIN_ROW), expired)
     assert exc_info.value.status_code == 401
 
 
-def test_decode_token_missing_sub_raises_401():
+@pytest.mark.asyncio
+async def test_user_from_token_missing_sub_raises_401():
     from fastapi import HTTPException
     from datetime import datetime, timezone, timedelta
     payload = {"role": "admin", "exp": datetime.now(timezone.utc) + timedelta(hours=1)}
     token = pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     with pytest.raises(HTTPException) as exc_info:
-        decode_token(token)
+        await user_from_token(_pool_with_row(_ADMIN_ROW), token)
     assert exc_info.value.status_code == 401
+
+
+def test_verify_password_over_72_bytes_is_false_not_error():
+    assert verify_password("x" * 100, _HASH) is False
 
 
 # ── Token endpoint ────────────────────────────────────────────────────────────
@@ -187,11 +236,12 @@ def test_protected_endpoint_accepts_valid_token():
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value=0)
     conn.fetch = AsyncMock(return_value=[])
+    conn.fetchrow = AsyncMock(return_value=_ADMIN_ROW)
     pool = MagicMock()
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
     app.dependency_overrides[get_pool] = lambda: pool
-    token = create_token("admin", "admin")
+    token = create_token("admin", "admin", _HASH)
     try:
         with TestClient(app) as c:
             resp = c.get("/api/alerts", headers={"Authorization": f"Bearer {token}"})
@@ -216,13 +266,13 @@ def test_write_endpoint_accepts_admin_role():
     from app.dependencies import get_pool
 
     conn = AsyncMock()
-    conn.fetchrow = AsyncMock(return_value=None)
+    conn.fetchrow = AsyncMock(return_value=_ADMIN_ROW)
     conn.execute = AsyncMock(return_value=None)
     pool = MagicMock()
     pool.acquire.return_value.__aenter__ = AsyncMock(return_value=conn)
     pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
     app.dependency_overrides[get_pool] = lambda: pool
-    token = create_token("admin", "admin")
+    token = create_token("admin", "admin", _HASH)
     try:
         with TestClient(app) as c:
             resp = c.put(
@@ -240,3 +290,16 @@ def test_health_endpoint_needs_no_auth():
         resp = c.get("/health")
     # Health is unauthenticated — must not return 401/403 regardless of service state
     assert resp.status_code not in (401, 403)
+
+
+def test_token_endpoint_returns_429_after_repeated_failures():
+    from app.dependencies import get_pool
+    for _ in range(5):
+        record_failure("locked-out")
+    app.dependency_overrides[get_pool] = lambda: _pool_with_row(None)
+    try:
+        with TestClient(app) as c:
+            resp = c.post("/api/auth/token", data={"username": "locked-out", "password": "x"})
+    finally:
+        app.dependency_overrides.clear()
+    assert resp.status_code == 429

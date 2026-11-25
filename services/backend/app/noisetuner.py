@@ -286,6 +286,7 @@ async def _call_tuner_llm(
 
         # Validate and normalise each item
         sig_lookup = {s["signature"]: s for s in expected_sigs}
+        id_lookup = {s["signature_id"]: s for s in expected_sigs if s["signature_id"] is not None}
         validated: list[dict] = []
         for item in suggestions:
             sig = item.get("signature", "")
@@ -319,16 +320,16 @@ async def _call_tuner_llm(
             else:
                 t_count = t_seconds = t_track = t_type = None
 
-            # Prefer the echoed signature_id from the LLM; fall back to string lookup.
-            llm_sig_id = item.get("signature_id")
-            original = sig_lookup.get(sig)
-            resolved_sig_id = llm_sig_id if isinstance(llm_sig_id, int) else (
-                original["signature_id"] if original else None
-            )
+            # Match back to a signature we actually sent (by echoed id, else by name) and
+            # take id/name from the DB: an LLM-invented id must never reach suppress.conf.
+            original = id_lookup.get(item.get("signature_id")) or sig_lookup.get(sig)
+            if original is None:
+                logger.warning("Noisetuner: LLM suggestion for unknown signature %r, skipping", sig)
+                continue
             validated.append({
-                "signature":         sig,
-                "signature_id":      resolved_sig_id,
-                "hit_count":         original["hit_count"] if original else 0,
+                "signature":         original["signature"],
+                "signature_id":      original["signature_id"],
+                "hit_count":         original["hit_count"],
                 "assessment":        assessment,
                 "action":            action,
                 "threshold_count":   t_count,
@@ -397,10 +398,13 @@ async def _run_tuner(pool) -> list[dict] | None:
 
     client = AsyncOpenAI(base_url=cfg_llm["url"], api_key="lm-studio")
     prompt = _build_tuner_prompt(sigs, cfg["lookback_days"])
-    suggestions = await _call_tuner_llm(
-        client, prompt, cfg_llm["model"], float(cfg_llm["timeout"]), sigs,
-        float(cfg_llm["temperature"]),
-    )
+    try:
+        suggestions = await _call_tuner_llm(
+            client, prompt, cfg_llm["model"], float(cfg_llm["timeout"]), sigs,
+            float(cfg_llm["temperature"]),
+        )
+    finally:
+        await client.close()
 
     if not suggestions:
         return []

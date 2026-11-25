@@ -129,7 +129,10 @@ class WebPushBackend:
     # ── Public interface ──────────────────────────────────────────────────────
 
     async def send(self, alert: dict) -> None:
-        """Send a push notification to all stored subscriptions."""
+        """Send a push notification to all stored subscriptions.
+
+        A failing subscription is logged and skipped so it never blocks the others.
+        """
         payload_json = json.dumps(self._build_payload(alert))
         subscriptions = await self._get_subscriptions()
 
@@ -147,7 +150,8 @@ class WebPushBackend:
                     )
                     await self._delete_subscription(sub["endpoint"])
                 else:
+                    # Don't raise: the router's retry would re-send to every subscription,
+                    # and the ones after this one would be skipped.
                     logger.warning(
                         "Web Push failed for %s…: %s", sub["endpoint"][:50], exc
                     )
-                    raise

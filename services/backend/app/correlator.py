@@ -127,7 +127,7 @@ async def _get_correlation_config(pool) -> tuple[int, int]:
 
 
 async def _fetch_recent_alerts(pool, window_minutes: int) -> list[dict]:
-    """Return up to 100 alerts from the last window_minutes, oldest first."""
+    """Return the newest (up to 100) alerts from the last window_minutes, oldest first."""
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -135,7 +135,7 @@ async def _fetch_recent_alerts(pool, window_minutes: int) -> list[dict]:
                 SELECT id, timestamp, signature, category, severity, src_ip, dst_ip
                 FROM alerts
                 WHERE timestamp >= NOW() - ($1 * INTERVAL '1 minute')
-                ORDER BY timestamp ASC
+                ORDER BY timestamp DESC
                 LIMIT 100
                 """,
                 window_minutes,
@@ -155,7 +155,7 @@ async def _fetch_recent_alerts(pool, window_minutes: int) -> list[dict]:
                 "src_ip": str(row["src_ip"]) if row["src_ip"] is not None else None,
                 "dst_ip": str(row["dst_ip"]) if row["dst_ip"] is not None else None,
             }
-            for row in rows
+            for row in reversed(rows)
         ]
     except Exception as exc:
         logger.warning("Correlator: failed to fetch alerts: %s", exc)
@@ -228,9 +228,12 @@ async def _run_correlation(redis_client, pool) -> None:
     )
 
     client = AsyncOpenAI(base_url=cfg["url"], api_key="lm-studio")
-    raw_incidents = await _call_correlator_llm(
-        client, alerts, cfg["model"], float(cfg["timeout"]), float(cfg["temperature"])
-    )
+    try:
+        raw_incidents = await _call_correlator_llm(
+            client, alerts, cfg["model"], float(cfg["timeout"]), float(cfg["temperature"])
+        )
+    finally:
+        await client.close()
 
     if not raw_incidents:
         logger.info("Correlator: LLM found no incidents")

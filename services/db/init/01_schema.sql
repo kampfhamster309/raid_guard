@@ -129,12 +129,8 @@ CREATE TABLE IF NOT EXISTS config (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Default configuration seed
+-- Default configuration seed.  Retention is fixed by the policies above, not
+-- by config keys; push filtering uses push_threshold (set from the dashboard).
 INSERT INTO config (key, value) VALUES
-    ('notification_min_severity',   'warning'),
-    ('ai_enrichment_enabled',       'true'),
-    ('ai_batch_interval_seconds',   '300'),
-    ('retention_alerts_days',       '90'),
-    ('retention_incidents_days',    '365'),
-    ('retention_digests_days',      '365')
+    ('ai_batch_interval_seconds',   '300')
 ON CONFLICT (key) DO NOTHING;

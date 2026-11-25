@@ -128,37 +128,6 @@ def test_build_payload_no_url_when_dashboard_url_empty():
     assert payload["url"] == ""
 
 
-# ── _is_enabled ───────────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_true_when_no_pool():
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=None)
-    assert await backend._is_enabled() is True
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_true_when_no_config_row():
-    pool, _ = _make_pool(fetchrow_return=None)
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
-    assert await backend._is_enabled() is True
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_false_when_config_says_false():
-    pool, _ = _make_pool(fetchrow_return={"value": "false"})
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
-    assert await backend._is_enabled() is False
-
-
-@pytest.mark.asyncio
-async def test_is_enabled_true_when_db_raises():
-    pool = MagicMock()
-    pool.acquire.side_effect = Exception("DB down")
-    backend = HomeAssistantBackend("http://ha.local/wh", pool=pool)
-    assert await backend._is_enabled() is True
-
-
 # ── send ──────────────────────────────────────────────────────────────────────
 
 

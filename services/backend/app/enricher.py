@@ -21,7 +21,9 @@ Fallback guarantees
 Serialised queue
 ----------------
 Alerts are processed one at a time (``await _enrich_one(...)`` before the next
-``pubsub.listen()`` iteration) to avoid overwhelming local inference.
+message) to avoid overwhelming local inference.  Only alerts at or above the
+push threshold are sent to the LLM; lower ones pass through unenriched so they
+never delay a push.
 """
 
 import asyncio
@@ -30,8 +32,9 @@ import logging
 
 from openai import AsyncOpenAI
 
-from .channels import ALERTS_ENRICHED, ALERTS_RAW
+from .channels import ALERTS_ENRICHED, ALERTS_RAW, subscribe_forever
 from .llm_config import get_llm_config
+from .notification_router import DEFAULT_THRESHOLD, SEVERITY_ORDER, _get_threshold
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +198,10 @@ async def enrich_single_alert(
 ) -> dict | None:
     """Call LM Studio for a single alert and return the enrichment dict, or None on failure."""
     client = AsyncOpenAI(base_url=url, api_key="lm-studio")
-    return await _call_llm(client, alert, model, timeout, max_tokens, temperature)
+    try:
+        return await _call_llm(client, alert, model, timeout, max_tokens, temperature)
+    finally:
+        await client.close()
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -213,49 +219,45 @@ async def run_enricher(redis_client, pool) -> None:
     _cached_url: str = ""
     client: AsyncOpenAI | None = None
 
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(ALERTS_RAW)
-
-    try:
-        async for message in pubsub.listen():
-            if message["type"] != "message":
-                continue
-
-            try:
-                alert = json.loads(message["data"])
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Enricher: invalid message payload: %s", exc)
-                continue
-
-            # Re-read config each alert — cheap single-row DB query
-            cfg = await get_llm_config(pool)
-            lm_url = cfg["url"]
-            model = cfg["model"]
-            timeout = float(cfg["timeout"])
-            max_tokens = int(cfg["max_tokens"])
-            temperature = float(cfg["temperature"])
-
-            if lm_url != _cached_url:
-                client = AsyncOpenAI(base_url=lm_url, api_key="lm-studio") if lm_url else None
-                if lm_url:
-                    logger.info("AI enricher: LM Studio URL changed → %s", lm_url)
-                else:
-                    logger.info("AI enricher: LM Studio URL cleared — passthrough mode")
-                _cached_url = lm_url
-
-            if client is not None and model:
-                # Serialised: await fully before processing the next message
-                await _enrich_one(client, redis_client, pool, alert, model, timeout, max_tokens, temperature)
-            else:
-                # Passthrough: forward unchanged so WebSocket + notification router work
-                try:
-                    await redis_client.publish(ALERTS_ENRICHED, message["data"])
-                except Exception as exc:
-                    logger.warning("Enricher passthrough publish failed: %s", exc)
-
-    except asyncio.CancelledError:
+    async for message in subscribe_forever(redis_client, ALERTS_RAW):
         try:
-            await pubsub.unsubscribe(ALERTS_RAW)
-        except Exception:
-            pass
-        raise
+            alert = json.loads(message["data"])
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning("Enricher: invalid message payload: %s", exc)
+            continue
+
+        # Re-read config each alert — cheap single-row DB query
+        cfg = await get_llm_config(pool)
+        lm_url = cfg["url"]
+        model = cfg["model"]
+        timeout = float(cfg["timeout"])
+        max_tokens = int(cfg["max_tokens"])
+        temperature = float(cfg["temperature"])
+
+        if lm_url != _cached_url:
+            if client is not None:
+                await client.close()
+            client = AsyncOpenAI(base_url=lm_url, api_key="lm-studio") if lm_url else None
+            if lm_url:
+                logger.info("AI enricher: LM Studio URL changed → %s", lm_url)
+            else:
+                logger.info("AI enricher: LM Studio URL cleared — passthrough mode")
+            _cached_url = lm_url
+
+        # Only alerts that will be pushed wait for the LLM; the rest pass straight
+        # through so a burst of info noise can't delay a critical push.  They can
+        # still be enriched on demand via POST /api/alerts/{id}/enrich.
+        threshold = await _get_threshold(pool)
+        pushable = SEVERITY_ORDER.get(alert.get("severity"), 0) >= SEVERITY_ORDER.get(
+            threshold, SEVERITY_ORDER[DEFAULT_THRESHOLD]
+        )
+
+        if client is not None and model and pushable:
+            # Serialised: await fully before processing the next message
+            await _enrich_one(client, redis_client, pool, alert, model, timeout, max_tokens, temperature)
+        else:
+            # Passthrough: forward unchanged so WebSocket + notification router work
+            try:
+                await redis_client.publish(ALERTS_ENRICHED, message["data"])
+            except Exception as exc:
+                logger.warning("Enricher passthrough publish failed: %s", exc)

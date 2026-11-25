@@ -94,35 +94,43 @@ async def confirm_suggestion(
                 detail=f"Suggestion is already {row['status']}",
             )
 
-        now = datetime.now(timezone.utc)
+        # Claim atomically so two concurrent confirms can't both write suppress.conf.
         updated = await conn.fetchrow(
             f"UPDATE tuning_suggestions SET status = 'confirmed', confirmed_at = $1 "
-            f"WHERE id = $2 RETURNING {_COLS}",
-            now,
+            f"WHERE id = $2 AND status = 'pending' RETURNING {_COLS}",
+            datetime.now(timezone.utc),
             suggestion_id,
         )
+        if updated is None:
+            raise HTTPException(status_code=409, detail="Suggestion was just handled by another request")
 
-    import logging
-    _log = logging.getLogger(__name__)
-
-    if row["action"] == "suppress" and row["signature_id"] is not None:
-        try:
-            await apply_suppression(row["signature_id"])
-        except RuntimeError as exc:
-            _log.warning("Tuning: suppression written but reload failed: %s", exc)
-
-    elif row["action"] == "threshold-adjust" and row["signature_id"] is not None:
-        params = body or ConfirmBody()
-        try:
+    sig_id = row["signature_id"]
+    try:
+        if row["action"] == "suppress" and sig_id is not None:
+            await apply_suppression(sig_id)
+        elif row["action"] == "threshold-adjust" and sig_id is not None:
+            params = body or ConfirmBody()
             await apply_threshold(
-                row["signature_id"],
+                sig_id,
                 params.threshold_count,
                 params.threshold_seconds,
                 params.threshold_track,
                 params.threshold_type,
             )
-        except RuntimeError as exc:
-            _log.warning("Tuning: threshold written but reload failed: %s", exc)
+    except OSError as exc:
+        # Nothing was written — put the suggestion back so it can be confirmed again.
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE tuning_suggestions SET status = 'pending', confirmed_at = NULL WHERE id = $1",
+                suggestion_id,
+            )
+        raise HTTPException(status_code=500, detail=f"Could not write suppress.conf: {exc}")
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Directive written, but the Suricata reload failed ({exc}). "
+            "It takes effect on the next Suricata restart.",
+        )
 
     return TuningSuggestion(**_row_to_dict(updated))
 
@@ -148,9 +156,11 @@ async def dismiss_suggestion(
             )
         updated = await conn.fetchrow(
             f"UPDATE tuning_suggestions SET status = 'dismissed' "
-            f"WHERE id = $1 RETURNING {_COLS}",
+            f"WHERE id = $1 AND status = 'pending' RETURNING {_COLS}",
             suggestion_id,
         )
+    if updated is None:
+        raise HTTPException(status_code=409, detail="Suggestion was just handled by another request")
     return TuningSuggestion(**_row_to_dict(updated))
 
 

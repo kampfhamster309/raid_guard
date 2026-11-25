@@ -155,8 +155,10 @@ async def unblock_device(
 
     try:
         await blocker.unblock(ip)
-    except FritzNotInHostTableError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    except FritzNotInHostTableError:
+        # Device left the host table (DHCP lease gone) — nothing to lift on the
+        # Fritzbox, but drop our record so it doesn't stay listed forever.
+        pass
     except FritzBlockerError as exc:
         raise _fritz_502(exc)
 

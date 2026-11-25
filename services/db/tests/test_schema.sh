@@ -128,20 +128,15 @@ for ht in alerts incidents digests; do
 done
 
 # ── Test 6: default config values seeded ─────────────────────────────────────
-result=$(psql_exec "SELECT value FROM config WHERE key='notification_min_severity';")
-[ "${result}" = "warning" ] \
-    && pass "config seed: notification_min_severity=warning" \
-    || fail "config seed: notification_min_severity=warning (got '${result}')"
-
-result=$(psql_exec "SELECT value FROM config WHERE key='ai_enrichment_enabled';")
-[ "${result}" = "true" ] \
-    && pass "config seed: ai_enrichment_enabled=true" \
-    || fail "config seed: ai_enrichment_enabled=true (got '${result}')"
+result=$(psql_exec "SELECT value FROM config WHERE key='ai_batch_interval_seconds';")
+[ "${result}" = "300" ] \
+    && pass "config seed: ai_batch_interval_seconds=300" \
+    || fail "config seed: ai_batch_interval_seconds=300 (got '${result}')"
 
 result=$(psql_exec "SELECT COUNT(*) FROM config;")
-[ "${result}" = "6" ] \
-    && pass "config seeded with 6 default rows" \
-    || fail "config seeded with 6 default rows (got ${result})"
+[ "${result}" = "1" ] \
+    && pass "config seeded with 1 default row" \
+    || fail "config seeded with 1 default row (got ${result})"
 
 # ── Test 7: alert CRUD ────────────────────────────────────────────────────────
 psql_exec "INSERT INTO alerts (timestamp, src_ip, dst_ip, src_port, dst_port,
@@ -175,11 +170,11 @@ result=$(psql_exec "SELECT content FROM digests LIMIT 1;")
     || fail "digests: insert and retrieve content"
 
 # ── Test 10: config upsert idempotency ───────────────────────────────────────
-psql_exec "INSERT INTO config (key, value) VALUES ('notification_min_severity', 'critical')
+psql_exec "INSERT INTO config (key, value) VALUES ('ai_batch_interval_seconds', '999')
            ON CONFLICT (key) DO NOTHING;" > /dev/null
 
-result=$(psql_exec "SELECT value FROM config WHERE key='notification_min_severity';")
-[ "${result}" = "warning" ] \
+result=$(psql_exec "SELECT value FROM config WHERE key='ai_batch_interval_seconds';")
+[ "${result}" = "300" ] \
     && pass "config: ON CONFLICT DO NOTHING preserves existing value" \
     || fail "config: ON CONFLICT DO NOTHING preserves existing value (got '${result}')"
 

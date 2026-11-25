@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from ..config_flag import config_flag
+
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(10.0)
@@ -88,36 +90,6 @@ class HomeAssistantBackend:
             "url": url,
         }
 
-    async def _is_enabled(self) -> bool:
-        """Read ``ha_enabled`` from the config table; default ``True``."""
-        if self._pool is None:
-            return True
-        try:
-            async with self._pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT value FROM config WHERE key = $1", _HA_ENABLED_KEY
-                )
-            return row["value"].lower() != "false" if row else True
-        except Exception as exc:
-            logger.warning("Could not read ha_enabled from DB: %s; defaulting to enabled", exc)
-            return True
-
-    async def _health_alerts_enabled(self) -> bool:
-        """Read ``ha_health_alerts_enabled`` from the config table; default ``True``."""
-        if self._pool is None:
-            return True
-        try:
-            async with self._pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT value FROM config WHERE key = $1", _HA_HEALTH_ALERTS_KEY
-                )
-            return row["value"].lower() != "false" if row else True
-        except Exception as exc:
-            logger.warning(
-                "Could not read ha_health_alerts_enabled from DB: %s; defaulting to enabled", exc
-            )
-            return True
-
     def _build_health_payload(self, component: str, component_label: str, ok: bool) -> dict:
         return {
             "title": f"raid_guard — {'Component Recovered' if ok else 'Component Unhealthy'}",
@@ -141,7 +113,7 @@ class HomeAssistantBackend:
         if not self._url:
             logger.debug("HA alert webhook not configured; skipping alert %s", alert.get("id"))
             return
-        if not await self._is_enabled():
+        if not await config_flag(self._pool, _HA_ENABLED_KEY):
             logger.debug("HA notifications disabled; skipping alert %s", alert.get("id"))
             return
         await self._post(self._url, self._build_payload(alert))
@@ -151,7 +123,7 @@ class HomeAssistantBackend:
         """Dispatch one health transition. Swallows errors — health pings must not crash the watcher."""
         if not self._health_url:
             return
-        if not await self._health_alerts_enabled():
+        if not await config_flag(self._pool, _HA_HEALTH_ALERTS_KEY):
             logger.debug("HA health alerts disabled; skipping %s", component)
             return
         try:

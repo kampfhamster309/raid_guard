@@ -178,12 +178,15 @@ def test_unblock_removes_db_row(authed_client):
     assert ip_arg == "192.168.178.50"
 
 
-def test_unblock_not_in_host_table_returns_404(authed_client):
-    client, _ = authed_client
+def test_unblock_not_in_host_table_still_removes_record(authed_client):
+    client, conn = authed_client
     b = _mock_blocker(unblock_side_effect=FritzNotInHostTableError("not in table"))
     with _patch_blocker(b):
         resp = client.delete("/api/fritz/block/192.168.178.50")
-    assert resp.status_code == 404
+    assert resp.status_code == 204
+    conn.execute.assert_awaited_once_with(
+        "DELETE FROM fritz_blocked_devices WHERE ip = $1", "192.168.178.50"
+    )
 
 
 def test_unblock_fritz_error_returns_502(authed_client):

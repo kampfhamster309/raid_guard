@@ -57,6 +57,8 @@ def _rewrite_kuznetzov(data_iter: Iterator[bytes]) -> Iterator[bytes]:
         if not chunk:
             continue
         buf.extend(chunk)
+        # One output per input chunk: a FIFO write (and flush) per chunk, not two per packet.
+        out = bytearray()
 
         # ── global header ──────────────────────────────────────────────────────
         if not global_done:
@@ -73,19 +75,24 @@ def _rewrite_kuznetzov(data_iter: Iterator[bytes]) -> Iterator[bytes]:
                 )
             else:
                 logger.info("Fritzbox pcap: standard format (magic %s)", hdr[:4].hex())
-            yield bytes(hdr)
-            buf = buf[_PCAP_GLOBAL_LEN:]
+            out += hdr
+            del buf[:_PCAP_GLOBAL_LEN]
             global_done = True
 
         # ── per-packet records ─────────────────────────────────────────────────
-        while len(buf) >= pkt_hdr_len:
-            caplen = struct.unpack_from("<I", buf, 8)[0]
+        pos = 0
+        while len(buf) - pos >= pkt_hdr_len:
+            caplen = struct.unpack_from("<I", buf, pos + 8)[0]
             total = pkt_hdr_len + caplen
-            if len(buf) < total:
+            if len(buf) - pos < total:
                 break
-            yield bytes(buf[:_STD_PKT_HDR_LEN])       # emit standard 16-byte header
-            yield bytes(buf[pkt_hdr_len:total])        # emit packet data
-            buf = buf[total:]
+            out += buf[pos:pos + _STD_PKT_HDR_LEN]          # standard 16-byte header
+            out += buf[pos + pkt_hdr_len:pos + total]       # packet data
+            pos += total
+        del buf[:pos]
+
+        if out:
+            yield bytes(out)
 
 
 def ensure_fifo(path: Path = FIFO_PATH) -> None:

@@ -224,6 +224,7 @@ make test-ingestor   # Full ingest_alert path against real DB + Redis
 | `REDIS_URL` | `redis://redis:6379` | Redis connection URL |
 | `EVE_JSON_PATH` | `/var/log/suricata/eve.json` | Suricata EVE JSON log path |
 | `DETECTION_STALL_HOURS` | `6` | Hours with zero alerts (while eve.json is still being written) before `/api/status` and health alerts report the detection engine as stalled |
+| `EVE_JSON_MAX_BYTES` | `1073741824` | Suricata container: eve.json is truncated (checked hourly) once it grows past this size; `0` disables. Lines not yet read by a stopped backend are lost on truncate |
 | `EVE_JSON_STALL_MINUTES` | `15` | Minutes without any write to eve.json (while capture and Suricata both report healthy) before Alert Detection reports that no traffic is reaching Suricata |
 | `CAPTURE_READ_TIMEOUT_SECONDS` | `120` | capture-agent: seconds without a byte from the Fritzbox before the stream is dropped and reconnected |
 | `CAPTURE_DATA_STALE_SECONDS` | `300` | capture-agent: seconds without a packet written to the FIFO before `/health` reports degraded |

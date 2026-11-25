@@ -22,10 +22,18 @@ digests:new      Published by the digestor (RAID-015a) when a new periodic
                  security digest is created.  Payload: digest dict.
 """
 
+import asyncio
+import logging
 import os
-import redis.asyncio as aioredis
+from typing import AsyncIterator
+
 import redis as syncredis
-from contextlib import asynccontextmanager
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
+logger = logging.getLogger(__name__)
+
+_RESUBSCRIBE_DELAY_S = 2
 
 # ── Channel names ─────────────────────────────────────────────────────────────
 
@@ -33,8 +41,6 @@ ALERTS_RAW = "alerts:raw"
 ALERTS_ENRICHED = "alerts:enriched"
 INCIDENTS_NEW = "incidents:new"
 DIGESTS_NEW = "digests:new"
-
-ALL_CHANNELS = (ALERTS_RAW, ALERTS_ENRICHED, INCIDENTS_NEW, DIGESTS_NEW)
 
 # ── Connection helpers ────────────────────────────────────────────────────────
 
@@ -44,14 +50,28 @@ def get_redis_url() -> str:
     return os.environ.get("REDIS_URL", "redis://localhost:6379")
 
 
-@asynccontextmanager
-async def async_redis():
-    """Async context manager that yields a connected asyncio Redis client."""
-    client = aioredis.from_url(get_redis_url(), decode_responses=True)
-    try:
-        yield client
-    finally:
-        await client.aclose()
+async def subscribe_forever(redis_client, channel: str) -> AsyncIterator[dict]:
+    """Yield ``message`` events from *channel*, re-subscribing after Redis connection loss.
+
+    redis-py reconnects once on its own; if Redis is still down (restart, crash)
+    ``listen()`` raises and a plain loop would end for good.
+    """
+    while True:
+        pubsub = redis_client.pubsub()
+        try:
+            await pubsub.subscribe(channel)
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    yield message
+            return  # listen() ended without an error (only happens with test doubles)
+        except (RedisConnectionError, RedisTimeoutError, OSError) as exc:
+            logger.warning("Redis subscription to %s lost (%s); retrying in %ds", channel, exc, _RESUBSCRIBE_DELAY_S)
+        finally:
+            try:
+                await pubsub.unsubscribe(channel)
+            except Exception:
+                pass
+        await asyncio.sleep(_RESUBSCRIBE_DELAY_S)
 
 
 def sync_redis() -> syncredis.Redis:
