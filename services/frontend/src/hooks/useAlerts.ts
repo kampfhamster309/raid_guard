@@ -4,7 +4,7 @@ import type { Alert, Severity, WsStatus } from "../types";
 import { useWebSocket } from "./useWebSocket";
 
 interface UseAlertsOptions {
-  severityFilter: Severity | "all";
+  severities: Severity[];
   searchText: string;
 }
 
@@ -18,27 +18,35 @@ interface UseAlertsResult {
 }
 
 export function useAlerts({
-  severityFilter,
+  severities,
   searchText,
 }: UseAlertsOptions): UseAlertsResult {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const seenIds = useRef(new Set<string>());
+  const latestRequest = useRef(0);
+  // A stable key so a new-but-equal severities array doesn't refetch on every render.
+  const severityKey = [...severities].sort().join(",");
 
   const load = useCallback(async () => {
+    const request = ++latestRequest.current;
+    const wanted = severityKey ? (severityKey.split(",") as Severity[]) : [];
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchAlerts({ limit: 100 });
+      // Filter on the server so rare levels aren't crowded out of the latest 100 by info noise.
+      const data = wanted.length ? await fetchAlerts({ limit: 100, severity: wanted }) : [];
+      if (request !== latestRequest.current) return; // a newer filter change won
       seenIds.current = new Set(data.map((a) => a.id));
       setAlerts(data);
     } catch (e) {
+      if (request !== latestRequest.current) return;
       setError(e instanceof Error ? e.message : "Failed to load alerts");
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) setLoading(false);
     }
-  }, []);
+  }, [severityKey]);
 
   useEffect(() => {
     void load();
@@ -58,7 +66,7 @@ export function useAlerts({
   const wsStatus = useWebSocket({ onMessage: handleMessage, enabled: !loading });
 
   const filteredAlerts = alerts.filter((a) => {
-    if (severityFilter !== "all" && a.severity !== severityFilter) return false;
+    if (!severities.includes(a.severity)) return false;
     if (searchText) {
       const q = searchText.toLowerCase();
       return (
