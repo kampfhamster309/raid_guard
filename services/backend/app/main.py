@@ -8,7 +8,7 @@ import redis.asyncio as aioredis
 from fastapi import Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
-from .auth import ADMIN_PASSWORD, ADMIN_USERNAME, decode_token, hash_password
+from .auth import ADMIN_PASSWORD, ADMIN_USERNAME, hash_password, user_from_token
 from .backends.gotify import GotifyBackend
 from .backends.homeassistant import HomeAssistantBackend
 from .backends.webpush import WebPushBackend
@@ -44,7 +44,7 @@ async def _seed_admin(pool) -> None:
         async with pool.acquire() as conn:
             count = await conn.fetchval("SELECT COUNT(*) FROM users")
             if count == 0:
-                hashed = hash_password(ADMIN_PASSWORD)
+                hashed = await asyncio.to_thread(hash_password, ADMIN_PASSWORD)
                 await conn.execute(
                     "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin')",
                     ADMIN_USERNAME,
@@ -194,7 +194,7 @@ async def ws_alerts(websocket: WebSocket, token: str = Query(...)):
     await websocket.accept()
 
     try:
-        decode_token(token)
+        await user_from_token(websocket.app.state.db_pool, token)
     except Exception:
         await websocket.close(code=1008, reason="Unauthorized")
         return

@@ -31,6 +31,7 @@ services:
       SURICATA_LOG_DIR: /var/log/suricata
       SURICATA_CONFIG: /etc/suricata/suricata.yaml
       SURICATA_DISABLE_CONF: /etc/suricata/custom/disable.conf
+      EVE_JSON_MAX_BYTES: ${EVE_JSON_MAX_BYTES:-1073741824}
     volumes:
       - pcap_pipe:/pcap:ro
       - suricata_logs:/var/log/suricata

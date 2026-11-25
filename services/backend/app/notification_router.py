@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 SEVERITY_ORDER: dict[str, int] = {"info": 0, "warning": 1, "critical": 2}
 DEFAULT_THRESHOLD = "warning"
 
+_pending_dispatches: set[asyncio.Task] = set()
+
 
 # ── Backend protocol ──────────────────────────────────────────────────────────
 
@@ -101,48 +103,38 @@ async def run_notification_router(
     on each message, and fires off a retry task per backend for qualifying
     alerts.
     """
-    from .channels import ALERTS_ENRICHED  # local import avoids circular dep at module level
+    from .channels import ALERTS_ENRICHED, subscribe_forever  # local import avoids circular dep at module level
 
     if not backends:
         logger.info("Notification router: no backends configured; idle.")
         return
 
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe(ALERTS_ENRICHED)
     logger.info(
         "Notification router started with %d backend(s): %s",
         len(backends),
         [b.name for b in backends],
     )
 
-    try:
-        async for message in pubsub.listen():
-            if message["type"] != "message":
-                continue
-
-            try:
-                alert = json.loads(message["data"])
-            except (json.JSONDecodeError, TypeError) as exc:
-                logger.warning("Notification router: invalid message payload: %s", exc)
-                continue
-
-            threshold = await _get_threshold(pool)
-            alert_level = SEVERITY_ORDER.get(alert.get("severity", "info"), 0)
-            threshold_level = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER[DEFAULT_THRESHOLD])
-
-            if alert_level < threshold_level:
-                logger.debug(
-                    "Alert %s severity=%s below threshold=%s; skipping.",
-                    alert.get("id"), alert.get("severity"), threshold,
-                )
-                continue
-
-            for backend in backends:
-                asyncio.create_task(_dispatch_with_retry(backend, alert))
-
-    except asyncio.CancelledError:
+    async for message in subscribe_forever(redis_client, ALERTS_ENRICHED):
         try:
-            await pubsub.unsubscribe(ALERTS_ENRICHED)
-        except Exception:
-            pass
-        raise
+            alert = json.loads(message["data"])
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.warning("Notification router: invalid message payload: %s", exc)
+            continue
+
+        threshold = await _get_threshold(pool)
+        alert_level = SEVERITY_ORDER.get(alert.get("severity", "info"), 0)
+        threshold_level = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER[DEFAULT_THRESHOLD])
+
+        if alert_level < threshold_level:
+            logger.debug(
+                "Alert %s severity=%s below threshold=%s; skipping.",
+                alert.get("id"), alert.get("severity"), threshold,
+            )
+            continue
+
+        for backend in backends:
+            # Keep a reference: asyncio holds tasks weakly, so an unreferenced one can be GC'd mid-send.
+            task = asyncio.create_task(_dispatch_with_retry(backend, alert))
+            _pending_dispatches.add(task)
+            task.add_done_callback(_pending_dispatches.discard)

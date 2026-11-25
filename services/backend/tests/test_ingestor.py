@@ -259,3 +259,64 @@ async def test_ingest_alert_raw_json_is_serialised():
     assert isinstance(raw_json_param, str)
     parsed = json.loads(raw_json_param)
     assert parsed["event_type"] == "alert"
+
+
+# ── tail_eve_json ─────────────────────────────────────────────────────────────
+
+
+async def _next_line(gen, timeout=2.0):
+    return await asyncio.wait_for(gen.__anext__(), timeout)
+
+
+@pytest.mark.asyncio
+async def test_tail_waits_for_the_rest_of_a_partial_line(tmp_path):
+    from app.ingestor import tail_eve_json
+
+    eve = tmp_path / "eve.json"
+    eve.write_text("")
+    gen = tail_eve_json(eve)
+    first = asyncio.ensure_future(_next_line(gen))
+    await asyncio.sleep(0.15)  # generator has opened the file and hit EOF
+
+    with open(eve, "a") as fh:
+        fh.write('{"event_type": "al')  # Suricata mid-write
+        fh.flush()
+        await asyncio.sleep(0.25)
+        fh.write('ert"}\n')
+
+    line, _, offset = await first
+    assert line == '{"event_type": "alert"}'
+    assert offset == eve.stat().st_size
+    await gen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tail_resumes_from_saved_position(tmp_path):
+    from app.ingestor import tail_eve_json
+
+    eve = tmp_path / "eve.json"
+    eve.write_text("old\n")
+    saved = (eve.stat().st_ino, eve.stat().st_size)
+    with open(eve, "a") as fh:
+        fh.write("written while down\n")
+
+    gen = tail_eve_json(eve, start=saved)
+    line, _, _ = await _next_line(gen)
+    assert line == "written while down"
+    await gen.aclose()
+
+
+@pytest.mark.asyncio
+async def test_tail_rereads_after_truncation(tmp_path):
+    from app.ingestor import tail_eve_json
+
+    eve = tmp_path / "eve.json"
+    eve.write_text("a much longer line before truncation\n")
+    gen = tail_eve_json(eve, start=(eve.stat().st_ino, eve.stat().st_size))
+    pending = asyncio.ensure_future(_next_line(gen))
+    await asyncio.sleep(0.15)
+
+    eve.write_text("after\n")  # truncate + write, same inode
+    line, _, _ = await pending
+    assert line == "after"
+    await gen.aclose()

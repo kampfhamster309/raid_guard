@@ -272,7 +272,7 @@ def test_llm_test_returns_content_on_success(authed_client):
     conn.fetch = AsyncMock(return_value=_DB_CONFIG)
 
     with patch("app.routers.settings.AsyncOpenAI") as MockOpenAI:
-        mock_client = MagicMock()
+        mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             return_value=_make_openai_response(_GOOD_LLM_RESPONSE)
         )
@@ -289,7 +289,7 @@ def test_llm_test_returns_504_on_timeout(authed_client):
     conn.fetch = AsyncMock(return_value=_DB_CONFIG)
 
     with patch("app.routers.settings.AsyncOpenAI") as MockOpenAI:
-        mock_client = MagicMock()
+        mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=asyncio.TimeoutError()
         )
@@ -306,7 +306,7 @@ def test_llm_test_returns_502_on_api_error(authed_client):
     conn.fetch = AsyncMock(return_value=_DB_CONFIG)
 
     with patch("app.routers.settings.AsyncOpenAI") as MockOpenAI:
-        mock_client = MagicMock()
+        mock_client = AsyncMock()
         mock_client.chat.completions.create = AsyncMock(
             side_effect=Exception("Connection refused")
         )

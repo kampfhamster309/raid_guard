@@ -285,3 +285,31 @@ def test_run_tuner_returns_suggestions_on_success(authed_client):
     body = resp.json()
     assert len(body) == 1
     assert body[0]["action"] == "suppress"
+
+
+def test_confirm_suggestion_reports_reload_failure(authed_client):
+    client, conn = authed_client
+    row = _fake_suggestion_row(action="suppress", signature_id=2001219)
+    conn.fetchrow = AsyncMock(side_effect=[row, _fake_suggestion_row(status="confirmed")])
+    with patch("app.routers.tuning.apply_suppression", AsyncMock(side_effect=RuntimeError("docker down"))):
+        resp = client.post(f"/api/tuning/{row['id']}/confirm")
+    assert resp.status_code == 502
+    assert "docker down" in resp.json()["detail"]
+
+
+def test_confirm_suggestion_reverts_to_pending_when_write_fails(authed_client):
+    client, conn = authed_client
+    row = _fake_suggestion_row(action="suppress", signature_id=2001219)
+    conn.fetchrow = AsyncMock(side_effect=[row, _fake_suggestion_row(status="confirmed")])
+    with patch("app.routers.tuning.apply_suppression", AsyncMock(side_effect=OSError("read-only"))):
+        resp = client.post(f"/api/tuning/{row['id']}/confirm")
+    assert resp.status_code == 500
+    assert "status = 'pending'" in conn.execute.call_args[0][0]
+
+
+def test_confirm_suggestion_409_when_claim_lost_to_concurrent_request(authed_client):
+    client, conn = authed_client
+    row = _fake_suggestion_row()
+    conn.fetchrow = AsyncMock(side_effect=[row, None])
+    resp = client.post(f"/api/tuning/{row['id']}/confirm")
+    assert resp.status_code == 409

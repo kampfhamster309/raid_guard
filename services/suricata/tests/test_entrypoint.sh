@@ -45,7 +45,7 @@ EOF
 
     # Run the entrypoint; replace `exec suricata` so our mock is not exec'd
     # away (which would skip writing the args file).
-    FIFO_PATH="${fifo}" PATH="${mock_dir}:${PATH}" \
+    EVE_JSON_MAX_BYTES=0 FIFO_PATH="${fifo}" PATH="${mock_dir}:${PATH}" \
         bash <(sed 's/^exec suricata\b/suricata/' "${ENTRYPOINT}") 2>/dev/null
 
     rm -rf "${mock_dir}"

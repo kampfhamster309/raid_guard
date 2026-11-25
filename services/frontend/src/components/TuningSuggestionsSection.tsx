@@ -210,8 +210,10 @@ export function TuningSuggestionsSection() {
     try {
       await confirmSuggestion(id, params);
       setSuggestions((prev) => prev.filter((s) => s.id !== id));
-    } catch {
-      // swallow — leave item in list
+    } catch (e) {
+      // e.g. directive written but Suricata reload failed — show why and re-sync the list
+      setRunError(e instanceof Error ? e.message : "Confirm failed");
+      load();
     } finally {
       setBusyId(null);
     }
@@ -222,8 +224,9 @@ export function TuningSuggestionsSection() {
     try {
       await dismissSuggestion(id);
       setSuggestions((prev) => prev.filter((s) => s.id !== id));
-    } catch {
-      // swallow
+    } catch (e) {
+      setRunError(e instanceof Error ? e.message : "Dismiss failed");
+      load();
     } finally {
       setBusyId(null);
     }

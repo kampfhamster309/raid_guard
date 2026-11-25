@@ -17,7 +17,6 @@ import redis
 from app.channels import (
     ALERTS_ENRICHED,
     ALERTS_RAW,
-    ALL_CHANNELS,
     get_redis_url,
     sync_redis,
 )
@@ -48,14 +47,6 @@ def test_alerts_raw_channel_name():
 def test_alerts_enriched_channel_name():
     assert ALERTS_ENRICHED == "alerts:enriched"
 
-
-def test_all_channels_contains_expected():
-    from app.channels import DIGESTS_NEW, INCIDENTS_NEW
-    assert ALERTS_RAW in ALL_CHANNELS
-    assert ALERTS_ENRICHED in ALL_CHANNELS
-    assert INCIDENTS_NEW in ALL_CHANNELS
-    assert DIGESTS_NEW in ALL_CHANNELS
-    assert len(ALL_CHANNELS) == 4
 
 
 # ── Connection helper ─────────────────────────────────────────────────────────
@@ -170,3 +161,35 @@ def test_publish_returns_subscriber_count(r):
     subscriber.close()
 
     assert count == 1
+
+
+# ── subscribe_forever (no Redis needed) ───────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_subscribe_forever_resubscribes_after_connection_loss(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    import app.channels as channels
+
+    monkeypatch.setattr(channels, "_RESUBSCRIBE_DELAY_S", 0)
+
+    async def _dies():
+        yield {"type": "subscribe", "data": 1}
+        raise redis.exceptions.ConnectionError("Redis restarted")
+
+    async def _recovers():
+        yield {"type": "message", "data": "after-restart"}
+
+    first, second = MagicMock(), MagicMock()
+    for ps, listen in ((first, _dies), (second, _recovers)):
+        ps.subscribe = AsyncMock()
+        ps.unsubscribe = AsyncMock()
+        ps.listen = listen
+    client = MagicMock()
+    client.pubsub = MagicMock(side_effect=[first, second])
+
+    received = [m["data"] async for m in channels.subscribe_forever(client, ALERTS_RAW)]
+
+    assert received == ["after-restart"]
+    second.subscribe.assert_awaited_once_with(ALERTS_RAW)

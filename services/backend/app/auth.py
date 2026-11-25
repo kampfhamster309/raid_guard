@@ -13,16 +13,21 @@ viewer  Read-only; write endpoints return 403.
 
 Token format
 ------------
-JWT payload: ``{"sub": username, "role": role, "exp": ...}``
+JWT payload: ``{"sub": username, "role": role, "pwf": fingerprint, "exp": ...}``
 
-Backward compatibility
-----------------------
-Tokens issued before RAID-020 have no ``role`` claim and are treated as
-``viewer`` on decode (safest default — forces re-login after upgrade).
+Every request re-checks the token against the ``users`` row: a deleted user,
+or a token issued before the user's password changed (``pwf`` no longer
+matches the stored hash), is rejected, and the role comes from the DB.  If the
+DB is unreachable the signed claims are trusted, so the status page still
+loads during a DB outage.
 """
 
+import asyncio
+import hashlib
+import logging
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -31,9 +36,16 @@ import jwt as pyjwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
+from .dependencies import get_pool
+
+logger = logging.getLogger(__name__)
+
 JWT_SECRET: str = os.environ.get("JWT_SECRET", secrets.token_hex(32))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS: int = int(os.environ.get("JWT_EXPIRY_HOURS", "24"))
+
+# bcrypt only looks at the first 72 bytes (bcrypt 5 raises past that).
+MAX_PASSWORD_BYTES = 72
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -49,6 +61,8 @@ _FORBIDDEN = HTTPException(
 
 
 # ── Password helpers ──────────────────────────────────────────────────────────
+# bcrypt is deliberately slow (~0.25 s): callers run these via asyncio.to_thread
+# so a login never stalls the event loop that also runs the ingestor.
 
 
 def hash_password(password: str) -> str:
@@ -56,7 +70,39 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except ValueError:  # longer than 72 bytes — can't match any stored hash
+        return False
+
+
+_DUMMY_HASH = hash_password("dummy")
+
+
+# ── Failed-login limiter ──────────────────────────────────────────────────────
+
+_MAX_FAILURES = 5
+_FAILURE_WINDOW_S = 60.0
+_failed_logins: dict[str, list[float]] = {}
+
+
+def too_many_failures(username: str) -> bool:
+    """True if *username* had ``_MAX_FAILURES`` failed logins in the last minute."""
+    now = time.monotonic()
+    recent = [t for t in _failed_logins.get(username, []) if now - t < _FAILURE_WINDOW_S]
+    if recent:
+        _failed_logins[username] = recent
+    else:
+        _failed_logins.pop(username, None)
+    return len(recent) >= _MAX_FAILURES
+
+
+def record_failure(username: str) -> None:
+    # shortcut: per-process memory, cleared wholesale if spraying random usernames fills it;
+    # move to Redis if the backend ever runs more than one worker.
+    if len(_failed_logins) > 10_000:
+        _failed_logins.clear()
+    _failed_logins.setdefault(username, []).append(time.monotonic())
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -72,38 +118,29 @@ async def get_user_row(pool, username: str) -> dict | None:
     return dict(row) if row else None
 
 
-async def verify_credentials(pool, username: str, password: str) -> bool:
-    """Constant-time credential check against the users table."""
+async def verify_credentials(pool, username: str, password: str) -> dict | None:
+    """Return the users row if the password matches, else None (similar timing either way)."""
     row = await get_user_row(pool, username)
-    if row is None:
-        # Run a dummy verification so timing is similar regardless of existence.
-        bcrypt.checkpw(b"dummy", bcrypt.hashpw(b"dummy", bcrypt.gensalt()))
-        return False
-    return verify_password(password, row["password_hash"])
+    hashed = row["password_hash"] if row else _DUMMY_HASH
+    ok = await asyncio.to_thread(verify_password, password, hashed)
+    return row if ok and row else None
 
 
 # ── Token helpers ─────────────────────────────────────────────────────────────
 
 
-def create_token(username: str, role: str = "admin") -> str:
+def _password_fingerprint(password_hash: str) -> str:
+    return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
+
+
+def create_token(username: str, role: str = "admin", password_hash: str = "") -> str:
     payload = {
         "sub": username,
         "role": role,
+        "pwf": _password_fingerprint(password_hash),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRY_HOURS),
     }
     return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-
-def decode_token(token: str) -> str:
-    """Decode and validate *token*; return the username.  Raises 401 on failure."""
-    try:
-        payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        username: str | None = payload.get("sub")
-        if not username:
-            raise _UNAUTHORIZED
-        return username
-    except pyjwt.PyJWTError:
-        raise _UNAUTHORIZED
 
 
 # ── CurrentUser dataclass ─────────────────────────────────────────────────────
@@ -119,29 +156,38 @@ class CurrentUser:
         return self.role == "admin"
 
 
-def _decode_current_user(token: str) -> CurrentUser:
+async def user_from_token(pool, token: str) -> CurrentUser:
+    """Validate *token* and check it against the users table.  Raises 401."""
     try:
         payload = pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        username: str | None = payload.get("sub")
-        if not username:
-            raise _UNAUTHORIZED
-        role: str = payload.get("role", "viewer")
-        return CurrentUser(username=username, role=role)
     except pyjwt.PyJWTError:
         raise _UNAUTHORIZED
+    username: str | None = payload.get("sub")
+    if not username:
+        raise _UNAUTHORIZED
+
+    try:
+        row = await get_user_row(pool, username)
+    except Exception as exc:
+        logger.warning("Auth: users table unreachable (%s); trusting token claims", exc)
+        return CurrentUser(username=username, role=payload.get("role", "viewer"))
+
+    if row is None or payload.get("pwf") != _password_fingerprint(row["password_hash"]):
+        raise _UNAUTHORIZED  # user deleted, or password changed since the token was issued
+    return CurrentUser(username=row["username"], role=row["role"])
 
 
 # ── FastAPI dependencies ──────────────────────────────────────────────────────
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)) -> CurrentUser:
+async def get_current_user(token: str = Depends(oauth2_scheme), pool=Depends(get_pool)) -> CurrentUser:
     """Decode token and return a CurrentUser.  Used by require_admin and /users/me."""
-    return _decode_current_user(token)
+    return await user_from_token(pool, token)
 
 
-async def require_auth(token: str = Depends(oauth2_scheme)) -> str:
+async def require_auth(current_user: CurrentUser = Depends(get_current_user)) -> str:
     """Validate token and return username.  Any authenticated role is accepted."""
-    return _decode_current_user(token).username
+    return current_user.username
 
 
 async def require_admin(
@@ -153,9 +199,6 @@ async def require_admin(
     return current_user.username
 
 
-# ── Legacy env-var helper (kept for any remaining unit tests) ─────────────────
-
-# These module-level constants are read from env at import time.  They are used
-# only for the admin seed on first startup; login always goes through the DB.
+# Read from env at import time; used only to seed the first admin on startup.
 ADMIN_USERNAME: str = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "")

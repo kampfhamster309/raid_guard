@@ -485,5 +485,7 @@ async def test_llm(
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    finally:
+        await client.close()
 
     return LlmTestResponse(content=content)

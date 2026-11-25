@@ -46,7 +46,8 @@ outputs:
       enabled: yes
       filetype: regular
       filename: eve.json
-      # Rotate log daily; the ingestor tails this file continuously.
+      # Without a date pattern in filename this does not start a new file; the
+      # entrypoint caps eve.json size instead (EVE_JSON_MAX_BYTES).
       rotate-interval: day
       types:
         - alert:

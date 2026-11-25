@@ -349,3 +349,22 @@ async def test_run_correlation_skips_out_of_range_indices(monkeypatch):
         await _run_correlation(redis, pool)
 
     redis.publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_alerts_takes_newest_and_returns_oldest_first():
+    from datetime import timedelta, timezone
+
+    t0 = datetime(2026, 11, 25, 10, 0, tzinfo=timezone.utc)
+    # DB returns newest first (ORDER BY timestamp DESC LIMIT 100)
+    rows = [
+        {"id": uuid.uuid4(), "timestamp": t0 + timedelta(minutes=m), "signature": f"s{m}",
+         "category": None, "severity": "info", "src_ip": None, "dst_ip": None}
+        for m in (2, 1, 0)
+    ]
+    pool, conn = _make_pool(alerts=rows)
+
+    result = await _fetch_recent_alerts(pool, 30)
+
+    assert "ORDER BY timestamp DESC" in conn.fetch.call_args[0][0]
+    assert [a["signature"] for a in result] == ["s0", "s1", "s2"]

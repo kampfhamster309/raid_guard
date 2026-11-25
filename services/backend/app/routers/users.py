@@ -9,11 +9,20 @@ PUT    /api/users/{username}/password   Change a user's password (self or admin)
 DELETE /api/users/{username}            Delete a user (admin only; cannot delete self)
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, field_validator
 
-from ..auth import CurrentUser, get_current_user, hash_password, require_admin, verify_password
+from ..auth import (
+    MAX_PASSWORD_BYTES,
+    CurrentUser,
+    get_current_user,
+    hash_password,
+    require_admin,
+    verify_password,
+)
 from ..dependencies import get_pool
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -52,6 +61,8 @@ class CreateUserBody(BaseModel):
     def _min_password(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError("password must be at least 8 characters")
+        if len(v.encode()) > MAX_PASSWORD_BYTES:
+            raise ValueError(f"password must be at most {MAX_PASSWORD_BYTES} bytes")
         return v
 
 
@@ -64,6 +75,8 @@ class ChangePasswordBody(BaseModel):
     def _min_password(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError("new_password must be at least 8 characters")
+        if len(v.encode()) > MAX_PASSWORD_BYTES:
+            raise ValueError(f"new_password must be at most {MAX_PASSWORD_BYTES} bytes")
         return v
 
 
@@ -104,7 +117,7 @@ async def create_user(
     _: str = Depends(require_admin),
 ):
     """Create a new user.  Username must be unique."""
-    hashed = hash_password(body.password)
+    hashed = await asyncio.to_thread(hash_password, body.password)
     async with pool.acquire() as conn:
         try:
             row = await conn.fetchrow(
@@ -142,10 +155,10 @@ async def change_password(
 
     # Non-admins must provide the current password even when changing their own.
     if not current_user.is_admin:
-        if not verify_password(body.current_password, row["password_hash"]):
+        if not await asyncio.to_thread(verify_password, body.current_password, row["password_hash"]):
             raise HTTPException(status_code=401, detail="Current password is incorrect")
 
-    new_hash = hash_password(body.new_password)
+    new_hash = await asyncio.to_thread(hash_password, body.new_password)
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE users SET password_hash = $1 WHERE username = $2",

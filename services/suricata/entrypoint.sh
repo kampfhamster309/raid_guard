@@ -2,7 +2,8 @@
 # raid_guard — Suricata entrypoint
 # 1. Update ET Open rules (cached; skips download if fresh)
 # 2. Wait for the capture-agent FIFO
-# 3. Start Suricata in PCAP-file-continuous mode
+# 3. Keep eve.json below EVE_JSON_MAX_BYTES (background check, hourly)
+# 4. Start Suricata in PCAP-file-continuous mode
 set -euo pipefail
 
 FIFO_PATH="${FIFO_PATH:-/pcap/fritz.pcap}"
@@ -31,7 +32,25 @@ until [ -p "${FIFO_PATH}" ]; do
 done
 echo "[entrypoint] FIFO found."
 
-# ── 3. Start Suricata ─────────────────────────────────────────────────────────
+# ── 3. Cap eve.json size ──────────────────────────────────────────────────────
+# rotate-interval only switches files when the filename has a date pattern, so
+# a fixed eve.json just grows.  The backend ingestor follows a truncated file
+# from the start.  shortcut: lines the ingestor hasn't read yet (backend down)
+# are lost on truncate; raise EVE_JSON_MAX_BYTES if that matters.  0 disables.
+EVE_JSON_MAX_BYTES="${EVE_JSON_MAX_BYTES:-1073741824}"
+if [ "${EVE_JSON_MAX_BYTES}" -gt 0 ]; then
+    (
+        while sleep 3600; do
+            EVE="${SURICATA_LOG_DIR}/eve.json"
+            if [ -f "${EVE}" ] && [ "$(stat -c %s "${EVE}")" -gt "${EVE_JSON_MAX_BYTES}" ]; then
+                echo "[entrypoint] eve.json over ${EVE_JSON_MAX_BYTES} bytes — truncating"
+                truncate -s 0 "${EVE}"
+            fi
+        done
+    ) &
+fi
+
+# ── 4. Start Suricata ─────────────────────────────────────────────────────────
 echo "[entrypoint] Starting Suricata..."
 exec suricata \
     -c "${SURICATA_CONFIG}" \

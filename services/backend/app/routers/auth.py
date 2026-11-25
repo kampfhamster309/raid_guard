@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
-from ..auth import create_token, get_user_row, verify_credentials
+from ..auth import create_token, record_failure, too_many_failures, verify_credentials
 from ..dependencies import get_pool
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -18,12 +18,17 @@ async def get_token(
     form: OAuth2PasswordRequestForm = Depends(),
     pool=Depends(get_pool),
 ):
-    if not await verify_credentials(pool, form.username, form.password):
+    if too_many_failures(form.username):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed logins — wait a minute and try again",
+        )
+    row = await verify_credentials(pool, form.username, form.password)
+    if row is None:
+        record_failure(form.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    row = await get_user_row(pool, form.username)
-    role = row["role"] if row else "viewer"
-    return TokenResponse(access_token=create_token(form.username, role))
+    return TokenResponse(access_token=create_token(row["username"], row["role"], row["password_hash"]))

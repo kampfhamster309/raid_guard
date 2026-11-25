@@ -323,3 +323,31 @@ async def test_run_enricher_picks_up_url_change_without_restart():
     assert MockOpenAI.call_count == 2
     assert MockOpenAI.call_args_list[0][1]["base_url"] == "http://old-host:1234/v1"
     assert MockOpenAI.call_args_list[1][1]["base_url"] == "http://new-host:1234/v1"
+
+
+@pytest.mark.asyncio
+async def test_run_enricher_skips_llm_below_push_threshold(monkeypatch):
+    """Info alerts (default threshold: warning) pass through without waiting for the LLM."""
+    monkeypatch.setenv("LM_STUDIO_URL", "http://lmstudio:1234/v1")
+    monkeypatch.setenv("LM_STUDIO_MODEL", "gemma-4-27b")
+    info_alert = dict(_SAMPLE_ALERT, severity="info")
+
+    redis = MagicMock()
+    pubsub = MagicMock()
+    pubsub.subscribe = AsyncMock()
+    pubsub.listen = lambda: _make_pubsub_messages([info_alert])
+    pubsub.unsubscribe = AsyncMock()
+    redis.pubsub = MagicMock(return_value=pubsub)
+    redis.publish = AsyncMock()
+
+    pool, conn = _make_pool()
+    conn.fetchrow = AsyncMock(return_value=None)  # no push_threshold row → default "warning"
+
+    with patch("app.enricher.AsyncOpenAI") as MockOpenAI:
+        mock_client = AsyncMock()
+        MockOpenAI.return_value = mock_client
+        await run_enricher(redis, pool)
+
+    mock_client.chat.completions.create.assert_not_called()
+    _, payload = redis.publish.call_args[0]
+    assert json.loads(payload) == info_alert

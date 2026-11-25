@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from ..config_flag import config_flag
+
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(10.0)
@@ -138,36 +140,6 @@ class GotifyBackend:
             "extras": {"client::display": {"contentType": "text/markdown"}},
         }
 
-    async def _is_enabled(self) -> bool:
-        """Read ``gotify_enabled`` from the config table; default ``True``."""
-        if self._pool is None:
-            return True
-        try:
-            async with self._pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT value FROM config WHERE key = $1", _GOTIFY_ENABLED_KEY
-                )
-            return row["value"].lower() != "false" if row else True
-        except Exception as exc:
-            logger.warning("Could not read gotify_enabled from DB: %s; defaulting to enabled", exc)
-            return True
-
-    async def _health_alerts_enabled(self) -> bool:
-        """Read ``gotify_health_alerts_enabled`` from the config table; default ``True``."""
-        if self._pool is None:
-            return True
-        try:
-            async with self._pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT value FROM config WHERE key = $1", _GOTIFY_HEALTH_ALERTS_KEY
-                )
-            return row["value"].lower() != "false" if row else True
-        except Exception as exc:
-            logger.warning(
-                "Could not read gotify_health_alerts_enabled from DB: %s; defaulting to enabled", exc
-            )
-            return True
-
     async def _post(self, token: str, payload: dict) -> None:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(f"{self._url}/message", params={"token": token}, json=payload)
@@ -181,7 +153,7 @@ class GotifyBackend:
         if not self._token:
             logger.debug("Gotify alert token not configured; skipping alert %s", alert.get("id"))
             return
-        if not await self._is_enabled():
+        if not await config_flag(self._pool, _GOTIFY_ENABLED_KEY):
             logger.debug("Gotify notifications disabled; skipping alert %s", alert.get("id"))
             return
         await self._post(self._token, self._build_payload(alert))
@@ -212,7 +184,7 @@ class GotifyBackend:
         """Dispatch one health transition. Swallows errors — health pings must not crash the watcher."""
         if not self._health_token:
             return
-        if not await self._health_alerts_enabled():
+        if not await config_flag(self._pool, _GOTIFY_HEALTH_ALERTS_KEY):
             logger.debug("Gotify health alerts disabled; skipping %s", component)
             return
         try:
