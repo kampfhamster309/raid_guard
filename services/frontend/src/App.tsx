@@ -67,12 +67,14 @@ function AlertsPage({
   onLogout: () => void;
 }) {
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
+  // Which levels the "All" view shows; info is off by default because it drowns out the rest.
+  const [shownSeverities, setShownSeverities] = useState<Severity[]>(["critical", "warning"]);
   const [searchText, setSearchText] = useState("");
   const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null);
   const [page, setPage] = useState<Page>("alerts");
 
   const { filteredAlerts, loading, error, wsStatus, refresh } = useAlerts({
-    severityFilter,
+    severities: severityFilter === "all" ? shownSeverities : [severityFilter],
     searchText,
   });
 
@@ -101,6 +103,8 @@ function AlertsPage({
           <FilterBar
             severityFilter={severityFilter}
             onSeverityChange={setSeverityFilter}
+            shownSeverities={shownSeverities}
+            onShownSeveritiesChange={setShownSeverities}
             searchText={searchText}
             onSearchChange={setSearchText}
           />

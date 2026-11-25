@@ -214,3 +214,22 @@ def test_enrich_alert_llm_failure(authed_client):
 
     assert resp.status_code == 504
     assert "timed out" in resp.json()["detail"]
+
+
+def test_list_alerts_filters_by_several_severities(authed_client):
+    client, conn = authed_client
+    conn.fetchval = AsyncMock(return_value=0)
+    conn.fetch = AsyncMock(return_value=[])
+
+    resp = client.get("/api/alerts?severity=warning&severity=critical")
+
+    assert resp.status_code == 200
+    sql, *args = conn.fetch.call_args[0]
+    assert "severity = ANY($1::severity_level[])" in sql
+    assert args[0] == ["warning", "critical"]
+
+
+def test_list_alerts_rejects_unknown_severity_in_list(authed_client):
+    client, conn = authed_client
+    resp = client.get("/api/alerts?severity=warning&severity=bogus")
+    assert resp.status_code == 422

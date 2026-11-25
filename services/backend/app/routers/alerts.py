@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 import asyncpg
@@ -85,7 +86,7 @@ def _row_to_detail(row) -> dict:
 
 
 def _build_where(
-    severity: str | None,
+    severity: list[str] | None,
     src_ip: str | None,
     after: datetime | None,
     before: datetime | None,
@@ -95,7 +96,7 @@ def _build_where(
 
     if severity:
         args.append(severity)
-        conditions.append(f"severity = ${len(args)}::severity_level")
+        conditions.append(f"severity = ANY(${len(args)}::severity_level[])")
     if src_ip:
         args.append(src_ip)
         conditions.append(f"src_ip = ${len(args)}::inet")
@@ -123,7 +124,8 @@ _DETAIL_COLS = _LIST_COLS + ", raw_json"
 async def list_alerts(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    severity: str | None = Query(None, pattern="^(info|warning|critical)$"),
+    # Repeatable: ?severity=warning&severity=critical
+    severity: list[Literal["info", "warning", "critical"]] | None = Query(None),
     src_ip: str | None = Query(None),
     after: datetime | None = Query(None),
     before: datetime | None = Query(None),

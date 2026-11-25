@@ -1,4 +1,4 @@
-import type { Alert, AlertEnrichment, BlockedDomain, Digest, Edition, GeoIpStatus, TracerouteResult, FritzBlockedDevice, FritzStatus, GotifySettings, HaSettings, Incident, IncidentDetail, LlmSettings, LlmStatus, PiholeSettings, RuleCategory, Stats, SystemStatus, TuningSuggestion, User } from "./types";
+import type { Alert, AlertEnrichment, BlockedDomain, Digest, Edition, GeoIpStatus, TracerouteResult, FritzBlockedDevice, FritzStatus, GotifySettings, HaSettings, Incident, IncidentDetail, LlmSettings, LlmStatus, PiholeSettings, RuleCategory, Severity, Stats, SystemStatus, TuningSuggestion, User } from "./types";
 
 const TOKEN_KEY = "raid_guard_token";
 
@@ -38,7 +38,7 @@ export async function login(
 export interface FetchAlertsParams {
   limit?: number;
   offset?: number;
-  severity?: string;
+  severity?: Severity[];
   src_ip?: string;
   after?: string;
   before?: string;
@@ -50,7 +50,7 @@ export async function fetchAlerts(
   const qs = new URLSearchParams();
   if (params.limit != null) qs.set("limit", String(params.limit));
   if (params.offset != null) qs.set("offset", String(params.offset));
-  if (params.severity) qs.set("severity", params.severity);
+  for (const s of params.severity ?? []) qs.append("severity", s);
   if (params.src_ip) qs.set("src_ip", params.src_ip);
   if (params.after) qs.set("after", params.after);
   if (params.before) qs.set("before", params.before);
